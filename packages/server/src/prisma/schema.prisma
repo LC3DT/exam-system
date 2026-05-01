@@ -134,7 +134,7 @@ model ExamInstance {
 
   answers ExamAnswer[]
 
-  @@index([examId, studentId])
+  @@unique([examId, studentId])
   @@index([examId])
   @@index([studentId])
 }

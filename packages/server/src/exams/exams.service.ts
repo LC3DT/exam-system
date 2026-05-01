@@ -221,16 +221,6 @@ export class ExamsService {
       throw new BadRequestException('不在考试时间范围内');
     }
 
-    const existing = await this.prisma.examInstance.findFirst({
-      where: { examId, studentId },
-    });
-    if (existing) {
-      const parsed = safeParse(existing.questions);
-      const questions = Array.isArray(parsed) ? parsed : [];
-      const enriched = await this.enrichQuestions(questions);
-      return { ...existing, questions: enriched, durationMinutes: exam.durationMinutes };
-    }
-
     const questionList: Array<{ questionId: string; sectionId: string; order: number }> = [];
     let globalOrder = 0;
 
@@ -260,27 +250,55 @@ export class ExamsService {
 
     const questionPayload = questionList.map((q) => ({ questionId: q.questionId, order: q.order }));
 
-    const instance = await this.prisma.$transaction(async (tx) => {
-      const inst = await tx.examInstance.create({
-        data: {
-          examId,
-          studentId,
-          questions: JSON.stringify(questionPayload),
-        },
-      });
-
-      if (questionList.length > 0) {
-        await tx.examAnswer.createMany({
-          data: questionList.map((q) => ({
-            instanceId: inst.id,
-            questionId: q.questionId,
-            status: 'unanswered',
-          })),
+    let instance: any;
+    try {
+      instance = await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.examInstance.findUnique({
+          where: { examId_studentId: { examId, studentId } },
         });
-      }
+        if (existing) return existing;
 
-      return inst;
-    });
+        const inst = await tx.examInstance.create({
+          data: {
+            examId,
+            studentId,
+            questions: JSON.stringify(questionPayload),
+          },
+        });
+
+        if (questionList.length > 0) {
+          await tx.examAnswer.createMany({
+            data: questionList.map((q) => ({
+              instanceId: inst.id,
+              questionId: q.questionId,
+              status: 'unanswered',
+            })),
+          });
+        }
+
+        return inst;
+      });
+    } catch (err: any) {
+      if (err.code === 'P2002') {
+        const existing = await this.prisma.examInstance.findUnique({
+          where: { examId_studentId: { examId, studentId } },
+        });
+        if (existing) {
+          const parsed = safeParse(existing.questions);
+          const questions = Array.isArray(parsed) ? parsed : [];
+          const enriched = await this.enrichQuestions(questions);
+          return { ...existing, questions: enriched, durationMinutes: exam.durationMinutes };
+        }
+      }
+      throw err;
+    }
+
+    if (!Array.isArray(instance.answers) && instance.questions) {
+      const parsed = safeParse(instance.questions);
+      const questions = Array.isArray(parsed) ? parsed : [];
+      const enriched = await this.enrichQuestions(questions);
+      return { ...instance, questions: enriched, durationMinutes: exam.durationMinutes };
+    }
 
     const enriched = await this.enrichQuestions(questionPayload);
     return { ...instance, questions: enriched, durationMinutes: exam.durationMinutes };

@@ -116,7 +116,7 @@ const ExamRoom: React.FC = () => {
         if (t <= 1) {
           if (!submittedRef.current) {
             submittedRef.current = true;
-            handleSubmit();
+            handleSubmit(true);
           }
           return 0;
         }
@@ -167,16 +167,11 @@ const ExamRoom: React.FC = () => {
     });
   }, [persistMarked]);
 
-  const handleSubmit = React.useCallback(async () => {
+  const doActualSubmit = React.useCallback(async () => {
     if (!sessionId || submittedRef.current) return;
-    if (!confirmSubmit) {
-      setConfirmSubmit(true);
-      const unanswered = questions.filter(q => !answers[q.questionId]).length;
-      if (unanswered > 0) return;
-    }
-    setConfirmSubmit(false);
-    setSubmitted(true);
     submittedRef.current = true;
+    setSubmitted(true);
+    setConfirmSubmit(false);
     try {
       const res = await api.post(`/sessions/${sessionId}/submit`);
       sessionStorage.removeItem('marked');
@@ -185,7 +180,21 @@ const ExamRoom: React.FC = () => {
       console.error('Submit failed:', err);
       setFinalScore({ score: 0, total: 100 });
     }
-  }, [sessionId, confirmSubmit, questions, answers]);
+  }, [sessionId]);
+
+  const handleSubmit = React.useCallback(async (force = false) => {
+    if (!sessionId || submittedRef.current) return;
+    if (force) {
+      await doActualSubmit();
+      return;
+    }
+    if (!confirmSubmit) {
+      setConfirmSubmit(true);
+      const unanswered = questions.filter(q => !answers[q.questionId]).length;
+      if (unanswered > 0) return;
+    }
+    await doActualSubmit();
+  }, [sessionId, confirmSubmit, questions, answers, doActualSubmit]);
 
   const cancelSubmit = React.useCallback(() => setConfirmSubmit(false), []);
 
@@ -266,7 +275,7 @@ const ExamRoom: React.FC = () => {
         <div className="exam-header-right">
           <span className="exam-header-progress">进度 {progressPct}%</span>
           <div className="exam-header-bar"><div className="exam-header-bar-fill" style={{ width: `${progressPct}%` }} /></div>
-          <button onClick={handleSubmit} className="exam-submit-btn" style={{ background: isTimeWarning ? '#fff' : 'rgba(255,255,255,0.2)', color: isTimeWarning ? '#ff4d4f' : '#fff' }}>
+          <button onClick={() => handleSubmit()} className="exam-submit-btn" style={{ background: isTimeWarning ? '#fff' : 'rgba(255,255,255,0.2)', color: isTimeWarning ? '#ff4d4f' : '#fff' }}>
             交 卷
           </button>
         </div>
@@ -283,7 +292,7 @@ const ExamRoom: React.FC = () => {
             )}
             <div className="exam-confirm-actions">
               <button onClick={cancelSubmit} className="exam-confirm-cancel">继续答题</button>
-              <button onClick={handleSubmit} className="exam-confirm-ok">确认交卷</button>
+              <button onClick={() => handleSubmit()} className="exam-confirm-ok">确认交卷</button>
             </div>
           </div>
         </div>

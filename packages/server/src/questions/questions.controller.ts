@@ -50,7 +50,7 @@ export class QuestionsController {
 
   @Roles('admin', 'teacher')
   @Post('import')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }))
   async importFile(@UploadedFile() file: Express.Multer.File, @Request() req) {
     if (!file) throw new BadRequestException('请上传文件');
     const workbook = XLSX.read(file.buffer, { type: 'buffer' });

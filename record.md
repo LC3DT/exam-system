@@ -465,3 +465,110 @@ pm2 start ecosystem.config.json
 | 错误处理 | 空 catch 块 | console.error + 分区错误类型 |
 | Docker | 无健康检查 | PostgreSQL/Redis healthchecks |
 | localStorage | 直接 JSON.parse | safeJsonParse + try/catch |
+
+---
+
+## 十一、第四轮优化 (项目 39-50)
+
+### P0 — 严重缺陷
+
+#### 39. generateInstance 竞态条件修复
+**现象**: `findFirst` 检查在事务外，且 `ExamInstance` 无唯一约束。两个请求同时进入会生成两份不同试卷实例
+**修复**:
+- `schema.prisma`: `ExamInstance` 添加 `@@unique([examId, studentId])`
+- `exams.service.ts`: `findFirst` 移到 `$transaction` 内，使用 `findUnique` 按唯一键查询
+- 捕获 `P2002` 唯一约束冲突错误，回退到查询已存在实例
+**文件**: prisma/schema.prisma, exams/exams.service.ts
+
+#### 40. 自动交卷失效修复
+**现象**: 倒计时归零只弹确认框，若有未答题则 `return` 不提交，答案丢失
+**修复**: `handleSubmit` 增加 `force` 参数。定时器传入 `true` 时跳过确认直接 `doActualSubmit()`
+**文件**: exam/src/pages/ExamRoom.tsx
+
+#### 41. JWT 密钥去硬编码
+**现象**: 5 处存在 `|| 'exam-system-secret-key-2024'` 硬编码回退，可被任意伪造 token
+**修复**:
+- `auth.module.ts` / `jwt.strategy.ts`: 将 `|| 'exam-system-secret-key-2024'` 替换为抛出 `Error('JWT_SECRET is required')`
+- `ecosystem.config.json` / `start.sh`: 移除回退值，保留环境变量注入
+- `main.ts`: 启动时校验 `JWT_SECRET` 必须存在
+**文件**: auth.module.ts, strategies/jwt.strategy.ts, main.ts, ecosystem.config.json, start.sh
+
+### P1 — 生产就绪
+
+#### 42. 健康检查端点
+**修复**: 新增 `HealthController` 和 `HealthModule`，暴露 `GET /api/health` 返回状态/时间/内存/运行时间
+**文件**: health/health.controller.ts, health/health.module.ts, app.module.ts
+
+#### 43. 文件上传大小限制
+**修复**: `questions.controller.ts` 中 `FileInterceptor` 添加 `limits: { fileSize: 10 * 1024 * 1024 }` (10MB)
+**文件**: questions/questions.controller.ts
+
+#### 44. 环境变量校验
+**修复**: `main.ts` bootstrap 入口检查 `DATABASE_URL` 和 `JWT_SECRET` 必须存在，缺失时 `process.exit(1)`
+**文件**: server/src/main.ts
+
+#### 45. 结构化日志
+**修复**: `main.ts` 使用 NestJS 内置 `Logger` 替代 bare `console.log`，设置 `logger: ['log', 'error', 'warn', 'debug']`
+**文件**: server/src/main.ts
+
+#### 46. 烟雾测试
+**修复**: 新增 `test/app.e2e-spec.ts` e2e 测试，验证：
+- `GET /api/health` 返回 200
+- `POST /api/auth/login` 空 body 返回 400 (ValidationPipe)
+- `POST /api/auth/login` 错误凭证返回 401
+**文件**: server/test/app.e2e-spec.ts, server/test/jest-e2e.json
+
+### P2 — 工程化
+
+#### 47. Swagger/OpenAPI 文档
+**修复**: 安装 `@nestjs/swagger` 和 `swagger-ui-express`，在 `main.ts` 配置 Swagger，暴露 `GET /api/docs`
+**文件**: server/src/main.ts, server/package.json
+
+#### 48. GitHub Actions CI 流水线
+**修复**: 新增 `.github/workflows/ci.yml`，执行：
+- Node.js 20/22 双版本矩阵
+- 构建 shared 包 + 生成 Prisma client
+- TypeScript 类型检查 (server/admin/exam)
+- Vite 构建 (admin/exam) + NestJS 构建 (server)
+- 运行 e2e 测试
+**文件**: .github/workflows/ci.yml
+
+#### 49. 种子数据密码环境变量
+**修复**: `seed.ts` 中硬编码密码改为 `SEED_ADMIN_PASS` / `SEED_TEACHER_PASS` / `SEED_STUDENT_PASS` 环境变量
+**文件**: prisma/seed.ts
+
+#### 50. Helmet 安全头
+**修复**: 安装 `helmet`，在 `main.ts` 中 `app.use(helmet())`，添加 XSS/Content-Type-Sniffing/Frame 等安全头
+**文件**: server/src/main.ts, server/package.json
+
+### 更新对比表
+
+| 维度 | 优化前 | 优化后 |
+|------|--------|--------|
+| 竞态条件 | 无唯一约束 + 事务外检查 | @@unique 约束 + 事务内检查 + P2002 处理 |
+| 自动交卷 | 仅弹确认框 | 定时器直接提交 (force=true) |
+| JWT 密钥 | 5 处硬编码回退 | 启动时必须设置，无回退 |
+| 健康检查 | 无 | GET /api/health |
+| 文件上传 | 无大小限制 | 10MB 限制 |
+| 环境变量 | 无校验 | 启动时校验 |
+| 日志 | console.log | NestJS Logger |
+| 测试 | 0 | 3 个 e2e smoke test |
+| API 文档 | 无 | Swagger /api/docs |
+| CI/CD | 无 | GitHub Actions |
+| 种子密码 | 明文硬编码 | 环境变量 |
+| 安全头 | 无 | Helmet (CSP/XSS/Frame) |
+
+## 十二、最终项目规模
+
+| 指标 | 数量 |
+|------|------|
+| 总源文件 | 70 个 |
+| REST 端点 | 31 个 (+1 health) |
+| WebSocket 事件 | 3 个 |
+| 数据库表 | 14 张 |
+| 数据库索引 | 17 个 |
+| 共享 DTO | 16 个 |
+| 管理端页面 | 9 个 (懒加载) |
+| 答题端页面 + 组件 | 6 个 (懒加载) |
+| e2e 测试 | 3 个 |
+| GitHub Actions | 1 个 workflow |

@@ -4,9 +4,12 @@ import * as bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 async function main() {
-  const adminHash = await bcrypt.hash('admin123', 10);
-  const teacherHash = await bcrypt.hash('teacher123', 10);
-  const studentHash = await bcrypt.hash('student123', 10);
+  const adminPwd = process.env.SEED_ADMIN_PASS || 'admin123';
+  const teacherPwd = process.env.SEED_TEACHER_PASS || 'teacher123';
+  const studentPwd = process.env.SEED_STUDENT_PASS || 'student123';
+  const adminHash = await bcrypt.hash(adminPwd, 10);
+  const teacherHash = await bcrypt.hash(teacherPwd, 10);
+  const studentHash = await bcrypt.hash(studentPwd, 10);
 
   await prisma.user.upsert({
     where: { username: 'admin' },

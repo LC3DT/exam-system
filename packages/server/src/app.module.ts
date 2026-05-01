@@ -9,6 +9,7 @@ import { ExamsModule } from './exams/exams.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { GradingModule } from './grading/grading.module';
 import { ReportsModule } from './reports/reports.module';
+import { HealthModule } from './health/health.module';
 import { RedisModule } from './redis/redis.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 
@@ -24,6 +25,7 @@ import { AuditInterceptor } from './common/interceptors/audit.interceptor';
     SessionsModule,
     GradingModule,
     ReportsModule,
+    HealthModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

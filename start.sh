@@ -22,7 +22,7 @@ for port in 3000 5173 5174; do
 done
 
 echo "Starting services..."
-setsid bash -c "DATABASE_URL='file:./dev.db' JWT_SECRET='${JWT_SECRET:-exam-system-secret-key-2024}' node $ROOT/packages/server/dist/main.js" < /dev/null > /tmp/exam-server.log 2>&1 &
+setsid bash -c "DATABASE_URL='file:./dev.db' JWT_SECRET='${JWT_SECRET:-exam-system-secret-key-2024}' JWT_SECRET='${JWT_SECRET:-exam-system-secret-key-2024}' node $ROOT/packages/server/dist/main.js" < /dev/null > /tmp/exam-server.log 2>&1 &
 setsid bash -c "cd $ROOT/packages/admin && npx vite --port 5173 --host 0.0.0.0" < /dev/null > /tmp/exam-admin.log 2>&1 &
 setsid bash -c "cd $ROOT/packages/exam && npx vite --port 5174 --host 0.0.0.0" < /dev/null > /tmp/exam-exam.log 2>&1 &
 

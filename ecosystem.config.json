@@ -6,7 +6,7 @@
       "cwd": "./",
       "env": {
         "DATABASE_URL": "file:./dev.db",
-        "JWT_SECRET": "${JWT_SECRET:-exam-system-secret-key-2024}"
+        "JWT_SECRET": "${JWT_SECRET}"
       },
       "instances": 1,
       "autorestart": true,
