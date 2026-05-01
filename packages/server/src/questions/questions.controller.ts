@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Put, Delete, Param, Query, Body, UseGuards, Request, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Query, Body, UseGuards, Request, UploadedFile, UseInterceptors, BadRequestException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { QuestionsService } from './questions.service';
 import { Roles, RolesGuard } from '../common/guards/roles.guard';
+import { memoryStorage } from 'multer';
 import * as XLSX from 'xlsx';
 
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -48,8 +49,9 @@ export class QuestionsController {
 
   @Roles('admin', 'teacher')
   @Post('import')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
   async importFile(@UploadedFile() file: Express.Multer.File, @Request() req) {
+    if (!file) throw new BadRequestException('请上传文件');
     const workbook = XLSX.read(file.buffer, { type: 'buffer' });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet);

@@ -116,7 +116,7 @@ const Questions: React.FC = () => {
             <Select options={typeOptions} />
           </Form.Item>
           <Form.Item name="content" label="题目内容" rules={[{ required: true }]}>
-            <TextArea rows={3} placeholder='JSON格式如: {"text":"题目描述"}' />
+            <TextArea rows={3} placeholder='JSON格式如: {"text":"题目描述"}。支持 **粗体**、`代码`、$公式$、$$LaTeX$$、<html>标签</html>' />
           </Form.Item>
           <Form.Item name="options" label="选项">
             <TextArea rows={3} placeholder='JSON格式如: [{"label":"A","content":"选项内容"}]' />

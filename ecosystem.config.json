@@ -1,0 +1,30 @@
+{
+  "apps": [
+    {
+      "name": "exam-server",
+      "script": "packages/server/dist/main.js",
+      "cwd": "./",
+      "env": {
+        "DATABASE_URL": "file:./dev.db",
+        "JWT_SECRET": "exam-system-secret-key-2024"
+      },
+      "instances": 1,
+      "autorestart": true,
+      "max_memory_restart": "500M"
+    },
+    {
+      "name": "exam-admin",
+      "script": "npx",
+      "args": "vite --port 5173 --host 0.0.0.0",
+      "cwd": "packages/admin",
+      "autorestart": true
+    },
+    {
+      "name": "exam-portal",
+      "script": "npx",
+      "args": "vite --port 5174 --host 0.0.0.0",
+      "cwd": "packages/exam",
+      "autorestart": true
+    }
+  ]
+}
