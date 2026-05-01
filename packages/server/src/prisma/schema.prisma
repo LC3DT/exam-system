@@ -1,0 +1,192 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  parentId  String?
+  parent    Organization? @relation("OrgHierarchy", fields: [parentId], references: [id])
+  children  Organization[] @relation("OrgHierarchy")
+  users     User[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  role         String
+  realName     String
+  orgId        String?
+  organization Organization? @relation(fields: [orgId], references: [id])
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  questions         Question[]
+  examsCreated      Exam[]          @relation("ExamCreator")
+  examSessions      ExamSession[]
+  violations        Violation[]
+  gradingTasks      GradingTask[]   @relation("Grader")
+  gradingAssignedBy GradingTask[]   @relation("Assigner")
+}
+
+model Question {
+  id             String   @id @default(uuid())
+  type           String
+  content        String
+  options        String?
+  answer         String
+  knowledgePoint String
+  difficulty     Float
+  estimatedTime  Int
+  tags           String   @default("[]")
+  status         String   @default("published")
+  creatorId      String
+  creator        User     @relation(fields: [creatorId], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  examSections    ExamSectionQuestion[]
+  examAnswers     ExamAnswer[]
+}
+
+model Exam {
+  id              String   @id @default(uuid())
+  title           String
+  totalScore      Float
+  durationMinutes Int
+  startTime       DateTime
+  endTime         DateTime
+  status          String   @default("draft")
+  paperMode       String
+  shuffleOptions  Boolean  @default(false)
+  shuffleQuestions Boolean @default(false)
+  creatorId       String
+  creator         User     @relation("ExamCreator", fields: [creatorId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  sections    ExamSection[]
+  instances   ExamInstance[]
+  sessions    ExamSession[]
+}
+
+model ExamSection {
+  id               String   @id @default(uuid())
+  examId           String
+  exam             Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  name             String
+  scorePerQuestion Float
+  orderIndex       Int
+  createdAt        DateTime @default(now())
+
+  questions ExamSectionQuestion[]
+  strategies ExamStrategy[]
+}
+
+model ExamSectionQuestion {
+  id          String   @id @default(uuid())
+  sectionId   String
+  section     ExamSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  questionId  String
+  question    Question @relation(fields: [questionId], references: [id])
+  orderIndex  Int
+}
+
+model ExamStrategy {
+  id              String @id @default(uuid())
+  sectionId       String
+  section         ExamSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  knowledgePoint  String
+  difficultyMin   Float
+  difficultyMax   Float
+  count           Int
+}
+
+model ExamInstance {
+  id        String   @id @default(uuid())
+  examId    String
+  exam      Exam     @relation(fields: [examId], references: [id])
+  studentId String
+  questions String
+  createdAt DateTime @default(now())
+
+  answers ExamAnswer[]
+}
+
+model ExamAnswer {
+  id           String   @id @default(uuid())
+  instanceId   String
+  instance     ExamInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  questionId   String
+  question     Question @relation(fields: [questionId], references: [id])
+  answer       String?
+  score        Float?
+  status       String   @default("unanswered")
+  markedForReview Boolean @default(false)
+  updatedAt    DateTime @updatedAt
+}
+
+model ExamSession {
+  id          String   @id @default(uuid())
+  examId      String
+  exam        Exam     @relation(fields: [examId], references: [id])
+  studentId   String
+  student     User     @relation(fields: [studentId], references: [id])
+  instanceId  String?
+  status      String   @default("active")
+  violationCount Int   @default(0)
+  startedAt   DateTime?
+  submittedAt DateTime?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  violations Violation[]
+}
+
+model Violation {
+  id          String   @id @default(uuid())
+  sessionId   String
+  session     ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentId   String
+  student     User     @relation(fields: [studentId], references: [id])
+  type        String
+  description String?
+  detectedAt  DateTime @default(now())
+}
+
+model GradingTask {
+  id          String   @id @default(uuid())
+  answerId    String
+  sectionId   String?
+  examId      String
+  graderId    String
+  grader      User     @relation("Grader", fields: [graderId], references: [id])
+  assignedBy  String
+  assigner    User     @relation("Assigner", fields: [assignedBy], references: [id])
+  score       Float?
+  comment     String?
+  status      String   @default("pending")
+  assignedAt  DateTime @default(now())
+  completedAt DateTime?
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  action    String
+  resource  String
+  resourceId String?
+  detail    String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+}

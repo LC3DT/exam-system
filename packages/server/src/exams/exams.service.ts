@@ -1,0 +1,240 @@
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { QuestionsService } from '../questions/questions.service';
+
+@Injectable()
+export class ExamsService {
+  constructor(
+    private prisma: PrismaService,
+    private questionsService: QuestionsService,
+  ) {}
+
+  async list(query: { status?: string; page?: number; pageSize?: number }) {
+    const status = query.status;
+    const page = Number(query.page || 1);
+    const pageSize = Number(query.pageSize || 20);
+    const where: any = {};
+    if (status) where.status = status;
+
+    const [items, total] = await Promise.all([
+      this.prisma.exam.findMany({
+        where,
+        include: { creator: { select: { realName: true } } },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.exam.count({ where }),
+    ]);
+    return { items, total, page, pageSize };
+  }
+
+  async getById(id: string) {
+    const exam = await this.prisma.exam.findUnique({
+      where: { id },
+      include: {
+        sections: {
+          include: { questions: { include: { question: true } }, strategies: true },
+          orderBy: { orderIndex: 'asc' },
+        },
+        creator: { select: { realName: true } },
+      },
+    });
+    if (!exam) throw new NotFoundException('试卷不存在');
+    return exam;
+  }
+
+  async create(data: any, creatorId: string) {
+    const { sections, ...examData } = data;
+
+    return this.prisma.exam.create({
+      data: {
+        ...examData,
+        creatorId,
+        sections: {
+          create: sections.map((s: any, i: number) => ({
+            name: s.name,
+            scorePerQuestion: s.scorePerQuestion,
+            orderIndex: i,
+            questions: data.paperMode === 'fixed' && s.fixedQuestionIds
+              ? { create: s.fixedQuestionIds.map((qid: string, qi: number) => ({ questionId: qid, orderIndex: qi })) }
+              : undefined,
+            strategies: data.paperMode === 'random' && s.randomStrategies
+              ? { create: s.randomStrategies.map((rs: any) => ({
+                  knowledgePoint: rs.knowledgePoint,
+                  difficultyMin: rs.difficultyMin ?? rs.difficulty?.min ?? 0,
+                  difficultyMax: rs.difficultyMax ?? rs.difficulty?.max ?? 1,
+                  count: rs.count,
+                })) }
+              : undefined,
+          })),
+        },
+      },
+      include: { sections: { include: { questions: true, strategies: true } } },
+    });
+  }
+
+  async update(id: string, data: any) {
+    const exam = await this.getById(id);
+    if (exam.status !== 'draft') throw new BadRequestException('只有草稿状态的试卷可以编辑');
+
+    await this.prisma.examSection.deleteMany({ where: { examId: id } });
+
+    const { sections, ...examData } = data;
+    return this.prisma.exam.update({
+      where: { id },
+      data: {
+        ...examData,
+        sections: {
+          create: sections.map((s: any, i: number) => ({
+            name: s.name,
+            scorePerQuestion: s.scorePerQuestion,
+            orderIndex: i,
+            questions: data.paperMode === 'fixed' && s.fixedQuestionIds
+              ? { create: s.fixedQuestionIds.map((qid: string, qi: number) => ({ questionId: qid, orderIndex: qi })) }
+              : undefined,
+            strategies: data.paperMode === 'random' && s.randomStrategies
+              ? { create: s.randomStrategies.map((rs: any) => ({
+                  knowledgePoint: rs.knowledgePoint,
+                  difficultyMin: rs.difficultyMin ?? rs.difficulty?.min ?? 0,
+                  difficultyMax: rs.difficultyMax ?? rs.difficulty?.max ?? 1,
+                  count: rs.count,
+                })) }
+              : undefined,
+          })),
+        },
+      },
+      include: { sections: { include: { questions: true, strategies: true } } },
+    });
+  }
+
+  async publish(id: string) {
+    const exam = await this.getById(id);
+    if (exam.status !== 'draft') throw new BadRequestException('只有草稿状态的试卷可以发布');
+
+    if (!exam.sections || exam.sections.length === 0) {
+      throw new BadRequestException('试卷至少需要一个大题');
+    }
+
+    for (const section of exam.sections) {
+      if (exam.paperMode === 'fixed' && (!section.questions || section.questions.length === 0)) {
+        throw new BadRequestException(`大题 "${section.name}" 在固定组卷模式下需要指定题目`);
+      }
+      if (exam.paperMode === 'random' && (!section.strategies || section.strategies.length === 0)) {
+        throw new BadRequestException(`大题 "${section.name}" 在随机组卷模式下需要配置抽题策略`);
+      }
+    }
+
+    return this.prisma.exam.update({
+      where: { id },
+      data: { status: 'published' },
+    });
+  }
+
+  async preview(id: string) {
+    const exam = await this.getById(id);
+    let totalQuestions = 0;
+    let totalDifficulty = 0;
+
+    for (const section of exam.sections) {
+      if (exam.paperMode === 'fixed') {
+        const count = section.questions?.length || 0;
+        totalQuestions += count;
+        for (const eq of section.questions || []) {
+          totalDifficulty += eq.question?.difficulty || 0;
+        }
+      } else {
+        for (const strategy of section.strategies || []) {
+          totalQuestions += strategy.count;
+          totalDifficulty += ((strategy.difficultyMin + strategy.difficultyMax) / 2) * strategy.count;
+        }
+      }
+    }
+
+    const avgDifficulty = totalQuestions > 0 ? totalDifficulty / totalQuestions : 0;
+    const estimatedAvgScore = Math.round((1 - avgDifficulty) * exam.totalScore * 100) / 100;
+
+    return {
+      title: exam.title,
+      totalScore: exam.totalScore,
+      durationMinutes: exam.durationMinutes,
+      paperMode: exam.paperMode,
+      totalQuestions,
+      avgDifficulty: Math.round(avgDifficulty * 100) / 100,
+      estimatedAvgScore,
+    };
+  }
+
+  async generateInstance(examId: string, studentId: string) {
+    const exam = await this.getById(examId);
+    if (exam.status !== 'published' && exam.status !== 'ongoing') {
+      throw new BadRequestException('试卷未发布');
+    }
+
+    const now = new Date();
+    if (now < new Date(exam.startTime) || now > new Date(exam.endTime)) {
+      throw new BadRequestException('不在考试时间范围内');
+    }
+
+    const existing = await this.prisma.examInstance.findFirst({
+      where: { examId, studentId },
+    });
+    if (existing) {
+      const parsed = safeParse(existing.questions);
+      return { ...existing, questions: Array.isArray(parsed) ? parsed : [] };
+    }
+
+    const questionList: Array<{ questionId: string; sectionId: string; order: number }> = [];
+    let globalOrder = 0;
+
+    for (const section of exam.sections) {
+      if (exam.paperMode === 'fixed') {
+        for (const eq of section.questions || []) {
+          questionList.push({ questionId: eq.questionId, sectionId: section.id, order: globalOrder++ });
+        }
+      } else {
+        for (const strategy of section.strategies || []) {
+          const questions = await this.questionsService.getByStrategy({
+            knowledgePoint: strategy.knowledgePoint,
+            difficultyMin: strategy.difficultyMin,
+            difficultyMax: strategy.difficultyMax,
+            count: strategy.count,
+          });
+          for (const q of questions) {
+            questionList.push({ questionId: q.id, sectionId: section.id, order: globalOrder++ });
+          }
+        }
+      }
+    }
+
+    if (exam.shuffleQuestions) {
+      questionList.sort(() => Math.random() - 0.5);
+    }
+
+    const instance = await this.prisma.examInstance.create({
+      data: {
+        examId,
+        studentId,
+        questions: JSON.stringify(questionList.map((q) => ({ questionId: q.questionId, order: q.order }))),
+      },
+    });
+
+    for (const q of questionList) {
+      await this.prisma.examAnswer.create({
+        data: {
+          instanceId: instance.id,
+          questionId: q.questionId,
+          status: 'unanswered',
+        },
+      });
+    }
+
+    const parsed = safeParse(instance.questions);
+    return { ...instance, questions: parsed };
+  }
+}
+
+function safeParse(v: any): any {
+  if (typeof v !== 'string') return v;
+  try { return JSON.parse(v); } catch { return v; }
+}
