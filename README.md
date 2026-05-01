@@ -21,46 +21,6 @@
 
 ---
 
-## 优化记录 (2026-05-01)
-
-### P0 — 关键缺陷
-
-- **DTO 校验**: 所有 Controller 使用 shared 包中 `class-validator` 装饰的 DTO，替换 `@Body() body: any`
-- **N+1 查询**: `saveAnswer` 使用 `upsert` 替代 3 次串行查询；`generateInstance` 使用 `createMany` 批量创建答题记录；`autoGrade` 使用 `$transaction` 批量更新分数
-- **数据库索引**: 添加 15 个索引覆盖高频查询：`ExamSession(examId+status)`、`ExamInstance(examId+studentId)`、`ExamAnswer(instanceId+questionId)`、`Question(knowledgePoint+difficulty+status)` 等
-- **XSS 安全**: 答题端 `renderContent` 改用 `DOMPurify.sanitize()` 替代自定义正则，白名单标签控制
-- **WebSocket 集成**: `SessionsService` 注入 `SessionsGateway`，交卷/违规/终止/延长时间事件实时推送到监考端
-- **审计日志**: `AuditInterceptor` 通过 `APP_INTERCEPTOR` 全局注册，记录所有非 GET 请求
-- **速率限制**: `ThrottlerModule` 全局限流 100 次/分钟，在 `auth/login` 和所有 API 端点生效
-
-### P1 — 高影响优化
-
-- **事务包裹**: `exams.update`、`sessions.submitExam`、`sessions.recordViolation`、`grading.submitGrade` 使用 `$transaction` 保证原子性
-- **代码分割**: 
-  - 管理端：所有 9 个页面 `React.lazy()` 懒加载 + vite `manualChunks` 拆分为 react/antd/vendor 三块
-  - 答题端：3 个页面 `React.lazy()` 懒加载 + vendor 拆分
-  - 首屏包从 1.3MB 降至约 200KB
-- **Memo 优化**: `AdminLayout`、`ExamRoom`、`Questions`、`Exams`、`Users`、`Monitor` 等页面的 `columns`/`menuItems` 用 `useMemo` 包裹，事件处理器用 `useCallback`
-- **竞态修复**: `ExamEdit.handlePublish` 改为独立构建 payload + 先保存/创建再发布，消除重复 `navigate()`
-- **错误处理**: 所有空 `catch {}` 块添加 `console.error()`；`Login` 区分 401/网络/其他错误；`ExamList` 显示加载失败提示；`ErrorBoundary` 添加 `componentDidCatch` 日志
-
-### P2 — 中影响优化
-
-- **组件拆分**: `ExamRoom` 拆分为 `Watermark`、`ExamQuestion` 独立 memo 组件，`formatTime` 提取为模块级函数
-- **共享类型**: shared 包构建产出 `dist/`，`package.json` 修正 `main`/`types` 指向；所有 Controller 和 Service 导入 shared 的 DTO 和枚举
-- **Fisher-Yates 洗牌**: `questions.getByStrategy` 使用正确的 Fisher-Yates 算法替换有偏的 `sort(() => Math.random() - 0.5)`
-- **DOMPurify**: 答题端引入 DOMPurify 库，`renderContent` 中先用正则预处理格式标记，再通过 DOMPurify 白名单过滤
-- **localStorage 安全**: `auth store` 中 `JSON.parse` 添加 `try/catch` 防止损坏数据导致崩溃
-
-### P3 — 基础设施
-
-- **Docker**: 添加 PostgreSQL 和 Redis 的 `healthcheck` 配置
-- **start.sh**: 增加端口清理、构建前端、JWT_SECRET 环境变量支持
-- **PM2**: 添加 `NODE_ENV` 和 JWT_SECRET 的 env 支持
-- **异常过滤器**: 透传非 HttpException 的 `exception.message`
-
----
-
 ## 系统架构
 
 ```
@@ -88,7 +48,7 @@
 ```
 exam-system/
 ├── packages/
-│   ├── shared/              # 共享类型 + DTO (已构建为 dist/)
+│   ├── shared/              # 共享类型定义 (枚举、DTO 接口)
 │   │   └── src/index.ts, dto.ts
 │   ├── server/              # NestJS 后端 (30 个 REST 端点 + WebSocket)
 │   │   └── src/
