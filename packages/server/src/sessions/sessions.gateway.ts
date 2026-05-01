@@ -29,10 +29,10 @@ export class SessionsGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   broadcastStatus(examId: string, data: any) {
-    this.server.to(`exam:${examId}`).emit('liveStatus', data);
+    return this.server.to(`exam:${examId}`).emit('liveStatus', data);
   }
 
   broadcastViolation(examId: string, violation: any) {
-    this.server.to(`exam:${examId}`).emit('newViolation', violation);
+    return this.server.to(`exam:${examId}`).emit('newViolation', violation);
   }
 }

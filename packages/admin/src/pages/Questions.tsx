@@ -14,6 +14,10 @@ const typeOptions = [
   { label: '主观题', value: 'essay' },
 ];
 
+const TypeTag: React.FC<{ type: string }> = React.memo(({ type }) => (
+  <Tag>{typeOptions.find((t) => t.value === type)?.label || type}</Tag>
+));
+
 const Questions: React.FC = () => {
   const [data, setData] = React.useState({ items: [], total: 0 });
   const [loading, setLoading] = React.useState(false);
@@ -22,7 +26,7 @@ const Questions: React.FC = () => {
   const [form] = Form.useForm();
   const [query, setQuery] = React.useState<{ page: number; pageSize: number; type?: string; knowledgePoint?: string }>({ page: 1, pageSize: 20 });
 
-  const fetch = async (q = query) => {
+  const fetchData = React.useCallback(async (q = query) => {
     setLoading(true);
     try {
       const res = await api.get('/questions', { params: q });
@@ -30,9 +34,9 @@ const Questions: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [query]);
 
-  React.useEffect(() => { fetch(); }, [query]);
+  React.useEffect(() => { fetchData(); }, [fetchData]);
 
   const handleSave = async () => {
     const values = await form.validateFields();
@@ -46,30 +50,42 @@ const Questions: React.FC = () => {
     setModalOpen(false);
     setEditing(null);
     form.resetFields();
-    fetch();
+    fetchData();
   };
 
   const handleDelete = async (id: string) => {
     await api.delete(`/questions/${id}`);
     message.success('已删除');
-    fetch();
+    fetchData();
   };
 
-  const openCreate = () => {
+  const openCreate = React.useCallback(() => {
     setEditing(null);
     form.resetFields();
     form.setFieldsValue({ type: 'single', difficulty: 0.5, estimatedTime: 60 });
     setModalOpen(true);
-  };
+  }, [form]);
 
-  const openEdit = (record: any) => {
+  const openEdit = React.useCallback((record: any) => {
     setEditing(record);
     setModalOpen(true);
     setTimeout(() => form.setFieldsValue(record), 100);
-  };
+  }, [form]);
 
-  const columns = [
-    { title: '类型', dataIndex: 'type', width: 80, render: (v: string) => <Tag>{typeOptions.find((t) => t.value === v)?.label || v}</Tag> },
+  const handleTypeFilter = React.useCallback((v: string | undefined) => {
+    setQuery((prev) => ({ ...prev, page: 1, type: v }));
+  }, []);
+
+  const handleKnowledgeFilter = React.useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    setQuery((prev) => ({ ...prev, page: 1, knowledgePoint: (e.target as HTMLInputElement).value }));
+  }, []);
+
+  const handlePagination = React.useCallback((p: number, ps: number) => {
+    setQuery((prev) => ({ ...prev, page: p, pageSize: ps }));
+  }, []);
+
+  const columns = React.useMemo(() => [
+    { title: '类型', dataIndex: 'type', width: 80, render: (_: string, record: any) => <TypeTag type={record.type} /> },
     { title: '题目内容', dataIndex: 'content', render: (v: any) => (typeof v === 'string' ? v : v?.text || '').slice(0, 60) + ((typeof v === 'string' ? v : v?.text || '').length > 60 ? '...' : '') },
     { title: '知识点', dataIndex: 'knowledgePoint', width: 120 },
     { title: '难度', dataIndex: 'difficulty', width: 80 },
@@ -86,14 +102,14 @@ const Questions: React.FC = () => {
         </Space>
       ),
     },
-  ];
+  ], [openEdit]);
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Title level={4} style={{ margin: 0 }}>题库管理</Title>
         <Space>
-          <Upload accept=".xlsx,.xls" showUploadList={false} customRequest={async (opt: any) => { const fd = new FormData(); fd.append('file', opt.file); await api.post('/questions/import', fd); message.success('导入完成'); fetch(); }}>
+          <Upload accept=".xlsx,.xls" showUploadList={false} customRequest={async (opt: any) => { const fd = new FormData(); fd.append('file', opt.file); await api.post('/questions/import', fd); message.success('导入完成'); fetchData(); }}>
             <Button icon={<UploadOutlined />}>导入Excel</Button>
           </Upload>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>添加题目</Button>
@@ -102,13 +118,13 @@ const Questions: React.FC = () => {
 
       <div style={{ marginBottom: 16 }}>
         <Space>
-          <Select placeholder="题型" allowClear style={{ width: 120 }} options={typeOptions} onChange={(v) => { setQuery({ ...query, page: 1, type: v }); }} />
-          <Input placeholder="知识点搜索" style={{ width: 200 }} onPressEnter={(e: any) => setQuery({ ...query, page: 1, knowledgePoint: e.target.value })} allowClear />
+          <Select placeholder="题型" allowClear style={{ width: 120 }} options={typeOptions} onChange={handleTypeFilter} />
+          <Input placeholder="知识点搜索" style={{ width: 200 }} onPressEnter={handleKnowledgeFilter} allowClear />
         </Space>
       </div>
 
       <Table rowKey="id" columns={columns} dataSource={data.items} loading={loading}
-        pagination={{ total: data.total, current: query.page, pageSize: query.pageSize, showTotal: (t) => `共 ${t} 题`, onChange: (p, ps) => setQuery({ ...query, page: p, pageSize: ps }) }} />
+        pagination={{ total: data.total, current: query.page, pageSize: query.pageSize, showTotal: (t) => `共 ${t} 题`, onChange: handlePagination }} />
 
       <Modal title={editing ? '编辑题目' : '添加题目'} open={modalOpen} onOk={handleSave} onCancel={() => { setModalOpen(false); setEditing(null); }} width={720} destroyOnClose>
         <Form form={form} layout="vertical">

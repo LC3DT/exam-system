@@ -89,3 +89,22 @@ export interface ViolationDto {
   type: ViolationType
   description: string
 }
+
+export {
+  LoginDto,
+  CreateUserDto,
+  UpdateUserDto,
+  ResetPasswordDto,
+  CreateQuestionDto,
+  UpdateQuestionDto,
+  BatchDeleteDto,
+  ExamListQueryDto,
+  CreateExamDto,
+  UpdateExamDto,
+  SaveAnswerDto,
+  RecordViolationDto,
+  TerminateSessionDto,
+  ExtendTimeDto,
+  AssignGradingDto,
+  SubmitGradeDto,
+} from './dto';

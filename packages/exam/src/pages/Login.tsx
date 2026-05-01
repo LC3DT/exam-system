@@ -19,8 +19,15 @@ const Login: React.FC = () => {
       const res = await api.post('/auth/login', { username, password });
       setAuth(res.data.accessToken, res.data.user);
       navigate('/exams');
-    } catch {
-      setError('用户名或密码错误');
+    } catch (err: any) {
+      console.error('Login error:', err);
+      if (err.response?.status === 401) {
+        setError('用户名或密码错误');
+      } else if (err.code === 'ERR_NETWORK') {
+        setError('网络连接失败，请检查网络');
+      } else {
+        setError(err.response?.data?.message || '登录失败，请稍后重试');
+      }
     } finally {
       setLoading(false);
     }
@@ -43,7 +50,7 @@ const Login: React.FC = () => {
             {loading ? '登录中...' : '进入考试'}
           </button>
         </form>
-        <p style={{ textAlign: 'center', color: '#bbb', fontSize: 12, marginTop: 20 }}>提示: 测试账号 student / student123</p>
+        <p style={{ textAlign: 'center', color: '#bbb', fontSize: 12, marginTop: 20 }}>提示: 请联系监考老师获取账号密码</p>
       </div>
     </div>
   );

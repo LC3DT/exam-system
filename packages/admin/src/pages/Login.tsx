@@ -19,8 +19,15 @@ const Login: React.FC = () => {
       setAuth(res.data.accessToken, res.data.user);
       message.success('登录成功');
       navigate('/dashboard');
-    } catch {
-      message.error('用户名或密码错误');
+    } catch (err: any) {
+      console.error('Login error:', err);
+      if (err.response?.status === 401) {
+        message.error('用户名或密码错误');
+      } else if (err.code === 'ERR_NETWORK') {
+        message.error('网络连接失败，请检查网络');
+      } else {
+        message.error(err.response?.data?.message || '登录失败，请稍后重试');
+      }
     } finally {
       setLoading(false);
     }

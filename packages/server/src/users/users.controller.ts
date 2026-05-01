@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Put, Param, Query, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Param, Query, Body, UseGuards, Request } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { UsersService } from './users.service';
 import { Roles, RolesGuard } from '../common/guards/roles.guard';
+import { CreateUserDto, UpdateUserDto, ResetPasswordDto } from '@exam/shared';
 
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('users')
@@ -22,19 +23,19 @@ export class UsersController {
 
   @Roles('admin')
   @Post()
-  create(@Body() body: { username: string; password: string; realName: string; role: string; orgId?: string }) {
+  create(@Body() body: CreateUserDto) {
     return this.usersService.create(body);
   }
 
   @Roles('admin')
   @Put(':id')
-  update(@Param('id') id: string, @Body() body: any) {
+  update(@Param('id') id: string, @Body() body: UpdateUserDto) {
     return this.usersService.update(id, body);
   }
 
   @Roles('admin')
   @Put(':id/reset-password')
-  resetPassword(@Param('id') id: string, @Body('password') password: string) {
-    return this.usersService.resetPassword(id, password);
+  resetPassword(@Param('id') id: string, @Body() body: ResetPasswordDto) {
+    return this.usersService.resetPassword(id, body.password);
   }
 }

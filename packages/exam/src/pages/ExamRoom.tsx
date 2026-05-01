@@ -1,5 +1,6 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import DOMPurify from 'dompurify';
 import api from '../api/client';
 import { useAuthStore } from '../stores/auth';
 import { shuffleArray } from '../utils/shuffle';
@@ -17,23 +18,39 @@ interface Question {
 }
 
 function renderContent(text: string): string {
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+  let prepared = text
     .replace(/\n/g, '<br/>')
     .replace(/`([^`]+)`/g, '<code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-family:monospace">$1</code>')
     .replace(/\$\$([^$]+)\$\$/g, '<span style="font-family:serif;font-style:italic;color:#555">$1</span>')
     .replace(/\$([^$]+)\$/g, '<span style="font-family:serif;font-style:italic;color:#555">$1</span>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
     .replace(/<html>([\s\S]*)<\/html>/g, '$1');
-  return html;
+  return DOMPurify.sanitize(prepared, { ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'code', 'span', 'br', 'p', 'div', 'pre'], ALLOWED_ATTR: ['style', 'class'] });
 }
+
+const Watermark: React.FC<{ text: string }> = React.memo(({ text }) => (
+  <div className="exam-watermark">
+    {Array.from({ length: 15 }).map((_, i) => (
+      <div key={i} className="exam-watermark-text" style={{ top: `${(i % 5) * 25}%`, left: `${(i % 5) * 25 - 5}%` }}>
+        {text}
+      </div>
+    ))}
+  </div>
+));
+
+const formatTime = (s: number): string => {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+};
 
 const ExamRoom: React.FC = () => {
   const { examId } = useParams();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const userName = useAuthStore((s) => s.user?.realName || s.user?.username || 'candidate');
+  const userId = useAuthStore((s) => s.user?.id?.slice(0, 8) || '');
   const [sessionId, setSessionId] = React.useState<string | null>(null);
   const [questions, setQuestions] = React.useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = React.useState(0);
@@ -47,10 +64,10 @@ const ExamRoom: React.FC = () => {
   const [confirmSubmit, setConfirmSubmit] = React.useState(false);
   const [warning, setWarning] = React.useState('');
   const [finalScore, setFinalScore] = React.useState<{ score: number; total: number } | null>(null);
-  const [serverTimeBase, setServerTimeBase] = React.useState(Date.now());
   const [showAnswerCard, setShowAnswerCard] = React.useState(false);
   const [guardPassed, setGuardPassed] = React.useState(false);
   const fullscreenChangeCount = React.useRef(0);
+  const submittedRef = React.useRef(false);
 
   React.useEffect(() => {
     const handleVisibility = () => {
@@ -75,9 +92,9 @@ const ExamRoom: React.FC = () => {
     };
   }, [sessionId]);
 
-  const persistMarked = (marks: Set<string>) => {
+  const persistMarked = React.useCallback((marks: Set<string>) => {
     sessionStorage.setItem('marked', JSON.stringify([...marks]));
-  };
+  }, []);
 
   React.useEffect(() => {
     enterExam();
@@ -96,7 +113,13 @@ const ExamRoom: React.FC = () => {
     if (timeLeft <= 0 || submitted) return;
     const timer = setInterval(() => {
       setTimeLeft((t) => {
-        if (t <= 1) { handleSubmit(); return 0; }
+        if (t <= 1) {
+          if (!submittedRef.current) {
+            submittedRef.current = true;
+            handleSubmit();
+          }
+          return 0;
+        }
         return t - 1;
       });
     }, 1000);
@@ -105,11 +128,7 @@ const ExamRoom: React.FC = () => {
 
   const enterExam = async () => {
     try {
-      const t0 = Date.now();
       const instanceRes = await api.post(`/exams/${examId}/enter`);
-      const serverNow = new Date(instanceRes.headers?.['date'] || Date.now()).getTime();
-      setServerTimeBase(serverNow - (Date.now() - t0));
-
       const instance = instanceRes.data;
       const qs = instance.questions.map((q: any) => ({
         ...q,
@@ -121,30 +140,35 @@ const ExamRoom: React.FC = () => {
       setSessionId(sessionRes.data.id);
       setTimeLeft(instance.durationMinutes * 60 || 3600);
     } catch (err: any) {
+      console.error('Enter exam failed:', err);
       setWarning(err.response?.data?.message || '进入考试失败');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAnswer = (questionId: string, value: any) => {
+  const handleAnswer = React.useCallback((questionId: string, value: any) => {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
     if (sessionId) {
-      api.post(`/sessions/${sessionId}/answer`, { questionId, answer: { correct: value }, markedForReview: markedForReview.has(questionId) }).catch(() => {});
+      api.post(`/sessions/${sessionId}/answer`, {
+        questionId,
+        answer: { correct: value },
+        markedForReview: markedForReview.has(questionId),
+      }).catch(() => {});
     }
-  };
+  }, [sessionId, markedForReview]);
 
-  const handleMark = (questionId: string) => {
+  const handleMark = React.useCallback((questionId: string) => {
     setMarkedForReview((prev) => {
       const next = new Set(prev);
       next.has(questionId) ? next.delete(questionId) : next.add(questionId);
       persistMarked(next);
       return next;
     });
-  };
+  }, [persistMarked]);
 
-  const handleSubmit = async () => {
-    if (!sessionId || submitted) return;
+  const handleSubmit = React.useCallback(async () => {
+    if (!sessionId || submittedRef.current) return;
     if (!confirmSubmit) {
       setConfirmSubmit(true);
       const unanswered = questions.filter(q => !answers[q.questionId]).length;
@@ -152,16 +176,18 @@ const ExamRoom: React.FC = () => {
     }
     setConfirmSubmit(false);
     setSubmitted(true);
+    submittedRef.current = true;
     try {
       const res = await api.post(`/sessions/${sessionId}/submit`);
       sessionStorage.removeItem('marked');
       setFinalScore({ score: res.data.score, total: res.data.total });
-    } catch {
+    } catch (err) {
+      console.error('Submit failed:', err);
       setFinalScore({ score: 0, total: 100 });
     }
-  };
+  }, [sessionId, confirmSubmit, questions, answers]);
 
-  const cancelSubmit = () => setConfirmSubmit(false);
+  const cancelSubmit = React.useCallback(() => setConfirmSubmit(false), []);
 
   if (loading) {
     return (
@@ -220,52 +246,16 @@ const ExamRoom: React.FC = () => {
   }
 
   const current = questions[currentIndex];
-  const formatTime = (s: number) => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-  };
-
   const answeredCount = Object.keys(answers).length;
   const progressPct = questions.length > 0 ? Math.round((answeredCount / questions.length) * 100) : 0;
   const isTimeWarning = timeLeft < 300;
   const unansweredCount = questions.filter(q => !answers[q.questionId]).length;
 
-  const renderOptions = (q: Question) => {
-    const opts = q.shuffledOptions || q.options || [];
-    return opts.map((opt: any) => {
-      const selected = q.type === 'multiple'
-        ? (Array.isArray(answers[q.questionId]) && answers[q.questionId].includes(opt.label))
-        : answers[q.questionId] === opt.label;
-      return (
-        <div key={opt.label}
-          onClick={() => {
-            if (q.type === 'multiple') {
-              const prev = Array.isArray(answers[q.questionId]) ? answers[q.questionId] : [];
-              const next = prev.includes(opt.label) ? prev.filter((v: string) => v !== opt.label) : [...prev, opt.label];
-              handleAnswer(q.questionId, next);
-            } else {
-              handleAnswer(q.questionId, opt.label);
-            }
-          }}
-          className={`exam-option ${selected ? 'active' : ''}`}>
-          <span className="exam-option-badge" style={{ background: selected ? '#1a73e8' : '#f0f0f0', color: selected ? '#fff' : '#666' }}>{opt.label}</span>
-          <span>{opt.content}</span>
-        </div>
-      );
-    });
-  };
+  const waterMarkText = `${userName} · ${userId}`;
 
   return (
     <div className="exam-container">
-      <div className="exam-watermark">
-        {Array.from({ length: 15 }).map((_, i) => (
-          <div key={i} className="exam-watermark-text" style={{ top: `${(i % 5) * 25}%`, left: `${(i % 5) * 25 - 5}%` }}>
-            {user?.realName || user?.username || 'candidate'} · {user?.id?.slice(0, 8) || ''}
-          </div>
-        ))}
-      </div>
+      <Watermark text={waterMarkText} />
 
       <div className="exam-header" style={{ background: isTimeWarning ? '#ff4d4f' : '#1a73e8' }}>
         <div className="exam-header-left">
@@ -302,50 +292,14 @@ const ExamRoom: React.FC = () => {
       <div className="exam-body">
         <div className="exam-main">
           {current && (
-            <div>
-              <div className="exam-q-meta">
-                <span className="exam-q-num">第 {currentIndex + 1} 题</span>
-                <span className="exam-q-type">
-                  {current.type === 'single' ? '单选题' : current.type === 'multiple' ? '多选题' : current.type === 'judge' ? '判断题' : current.type === 'fill' ? '填空题' : '问答题'}
-                </span>
-              </div>
-              <div className="exam-q-content"
-                dangerouslySetInnerHTML={{ __html: renderContent(
-                  typeof current.content === 'string' ? current.content : current.content?.text || ''
-                )}} />
-
-              {['single', 'multiple'].includes(current.type) && current.options && (
-                <div className="exam-options">{renderOptions(current)}</div>
-              )}
-
-              {current.type === 'judge' && (
-                <div className="exam-judge">
-                  {['true', 'false'].map((v) => (
-                    <div key={v} onClick={() => handleAnswer(current.questionId, v === 'true')}
-                      className={`exam-judge-btn ${answers[current.questionId] === (v === 'true') ? 'active' : ''}`}>
-                      {v === 'true' ? '✓ 正确' : '✗ 错误'}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {['fill', 'essay', 'code'].includes(current.type) && (
-                <textarea
-                  value={answers[current.questionId] || ''}
-                  onChange={(e) => handleAnswer(current.questionId, e.target.value)}
-                  placeholder="请输入答案..."
-                  rows={current.type === 'essay' ? 10 : 3}
-                  className="exam-textarea"
-                />
-              )}
-
-              <div style={{ marginTop: 24 }}>
-                <button onClick={() => handleMark(current.questionId)}
-                  className={`exam-mark-btn ${markedForReview.has(current.questionId) ? 'active' : ''}`}>
-                  {markedForReview.has(current.questionId) ? '⭐ 已标记' : '☆ 标记待查'}
-                </button>
-              </div>
-            </div>
+            <ExamQuestion
+              question={current}
+              index={currentIndex}
+              answer={answers[current.questionId]}
+              marked={markedForReview.has(current.questionId)}
+              onAnswer={handleAnswer}
+              onMark={handleMark}
+            />
           )}
         </div>
 
@@ -361,7 +315,8 @@ const ExamRoom: React.FC = () => {
               const isMarked = markedForReview.has(q.questionId);
               const isCurrent = i === currentIndex;
               return (
-                <div key={q.questionId} onClick={() => { setCurrentIndex(i); setShowAnswerCard(false); }}
+                <div key={q.questionId}
+                  onClick={() => { setCurrentIndex(i); setShowAnswerCard(false); }}
                   className={`exam-answer-card-num ${isAnswered ? 'answered' : ''} ${isMarked ? 'marked' : ''} ${isCurrent ? 'current' : ''}`}>
                   {i + 1}
                 </div>
@@ -384,5 +339,91 @@ const ExamRoom: React.FC = () => {
     </div>
   );
 };
+
+interface ExamQuestionProps {
+  question: Question;
+  index: number;
+  answer: any;
+  marked: boolean;
+  onAnswer: (questionId: string, value: any) => void;
+  onMark: (questionId: string) => void;
+}
+
+const ExamQuestion: React.FC<ExamQuestionProps> = React.memo(({ question, index, answer, marked, onAnswer, onMark }) => {
+  const q = question;
+
+  const optionsEl = React.useMemo(() => {
+    const opts = q.shuffledOptions || q.options || [];
+    return opts.map((opt: any) => {
+      const selected = q.type === 'multiple'
+        ? (Array.isArray(answer) && answer.includes(opt.label))
+        : answer === opt.label;
+      return (
+        <div key={opt.label}
+          onClick={() => {
+            if (q.type === 'multiple') {
+              const prev = Array.isArray(answer) ? answer : [];
+              const next = prev.includes(opt.label) ? prev.filter((v: string) => v !== opt.label) : [...prev, opt.label];
+              onAnswer(q.questionId, next);
+            } else {
+              onAnswer(q.questionId, opt.label);
+            }
+          }}
+          className={`exam-option ${selected ? 'active' : ''}`}>
+          <span className="exam-option-badge" style={{ background: selected ? '#1a73e8' : '#f0f0f0', color: selected ? '#fff' : '#666' }}>{opt.label}</span>
+          <span>{opt.content}</span>
+        </div>
+      );
+    });
+  }, [q.questionId, q.type, q.shuffledOptions, q.options, answer, onAnswer]);
+
+  const contentHtml = React.useMemo(() => ({
+    __html: renderContent(typeof q.content === 'string' ? q.content : q.content?.text || '')
+  }), [q.content]);
+
+  return (
+    <div>
+      <div className="exam-q-meta">
+        <span className="exam-q-num">第 {index + 1} 题</span>
+        <span className="exam-q-type">
+          {q.type === 'single' ? '单选题' : q.type === 'multiple' ? '多选题' : q.type === 'judge' ? '判断题' : q.type === 'fill' ? '填空题' : '问答题'}
+        </span>
+      </div>
+      <div className="exam-q-content" dangerouslySetInnerHTML={contentHtml} />
+
+      {['single', 'multiple'].includes(q.type) && q.options && (
+        <div className="exam-options">{optionsEl}</div>
+      )}
+
+      {q.type === 'judge' && (
+        <div className="exam-judge">
+          {['true', 'false'].map((v) => (
+            <div key={v} onClick={() => onAnswer(q.questionId, v === 'true')}
+              className={`exam-judge-btn ${answer === (v === 'true') ? 'active' : ''}`}>
+              {v === 'true' ? '✓ 正确' : '✗ 错误'}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {['fill', 'essay', 'code'].includes(q.type) && (
+        <textarea
+          value={answer || ''}
+          onChange={(e) => onAnswer(q.questionId, e.target.value)}
+          placeholder="请输入答案..."
+          rows={q.type === 'essay' ? 10 : 3}
+          className="exam-textarea"
+        />
+      )}
+
+      <div style={{ marginTop: 24 }}>
+        <button onClick={() => onMark(q.questionId)}
+          className={`exam-mark-btn ${marked ? 'active' : ''}`}>
+          {marked ? '⭐ 已标记' : '☆ 标记待查'}
+        </button>
+      </div>
+    </div>
+  );
+});
 
 export default ExamRoom;

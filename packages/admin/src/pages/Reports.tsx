@@ -4,6 +4,15 @@ import api from '../api/client';
 
 const { Title } = Typography;
 
+const questionColumns = [
+  { title: '题目ID', dataIndex: 'id', width: 120, render: (v: string) => v.slice(0, 8) },
+  { title: '题型', dataIndex: 'type', width: 80 },
+  { title: '知识点', dataIndex: 'knowledgePoint' },
+  { title: '难度', dataIndex: 'difficulty', width: 80 },
+  { title: '正确率', dataIndex: 'correctRate', width: 100, render: (v: number) => `${(v * 100).toFixed(0)}%` },
+  { title: '异常', dataIndex: 'isAnomalous', width: 80, render: (v: boolean) => v ? <Tag color="red">异常</Tag> : <Tag color="green">正常</Tag> },
+];
+
 const Reports: React.FC = () => {
   const [exams, setExams] = React.useState<any[]>([]);
   const [selectedExam, setSelectedExam] = React.useState<string | null>(null);
@@ -11,7 +20,7 @@ const Reports: React.FC = () => {
   const [questionAnalysis, setQuestionAnalysis] = React.useState<any[]>([]);
 
   React.useEffect(() => {
-    api.get('/exams', { params: { status: 'finished' } }).then((res) => setExams(res.data.items));
+    api.get('/exams', { params: { status: 'finished' } }).then((res) => setExams(res.data.items)).catch((err) => console.error('Failed to load exams:', err));
   }, []);
 
   React.useEffect(() => {
@@ -22,7 +31,7 @@ const Reports: React.FC = () => {
     ]).then(([r, q]) => {
       setReport(r.data);
       setQuestionAnalysis(q.data);
-    });
+    }).catch((err) => console.error('Failed to load report:', err));
   }, [selectedExam]);
 
   return (
@@ -44,14 +53,7 @@ const Reports: React.FC = () => {
           </Row>
 
           <Card title="试题分析" style={{ marginBottom: 16 }}>
-            <Table rowKey="id" dataSource={questionAnalysis} columns={[
-              { title: '题目ID', dataIndex: 'id', width: 120, render: (v: string) => v.slice(0, 8) },
-              { title: '题型', dataIndex: 'type', width: 80 },
-              { title: '知识点', dataIndex: 'knowledgePoint' },
-              { title: '难度', dataIndex: 'difficulty', width: 80 },
-              { title: '正确率', dataIndex: 'correctRate', width: 100, render: (v: number) => `${(v * 100).toFixed(0)}%` },
-              { title: '异常', dataIndex: 'isAnomalous', width: 80, render: (v: boolean) => v ? <Tag color="red">异常</Tag> : <Tag color="green">正常</Tag> },
-            ]} size="small" />
+            <Table rowKey="id" dataSource={questionAnalysis} columns={questionColumns} size="small" />
           </Card>
         </>
       )}

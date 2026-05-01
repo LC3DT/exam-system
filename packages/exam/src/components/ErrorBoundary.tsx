@@ -10,6 +10,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
     return { hasError: true, error };
   }
 
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[ErrorBoundary]', error, info);
+  }
+
   render() {
     if (this.state.hasError) {
       return (
@@ -20,6 +24,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
             <button
               onClick={() => { this.setState({ hasError: false }); window.location.reload(); }}
               style={{ padding: '8px 24px', background: '#1a73e8', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14 }}
+              aria-label="刷新页面"
             >
               刷新页面
             </button>

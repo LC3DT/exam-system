@@ -5,6 +5,7 @@ import { QuestionsService } from './questions.service';
 import { Roles, RolesGuard } from '../common/guards/roles.guard';
 import { memoryStorage } from 'multer';
 import * as XLSX from 'xlsx';
+import { CreateQuestionDto, UpdateQuestionDto, BatchDeleteDto } from '@exam/shared';
 
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('questions')
@@ -25,13 +26,13 @@ export class QuestionsController {
 
   @Roles('admin', 'teacher')
   @Post()
-  create(@Body() body: any, @Request() req) {
+  create(@Body() body: CreateQuestionDto, @Request() req) {
     return this.questionsService.create(body, req.user.id);
   }
 
   @Roles('admin', 'teacher')
   @Put(':id')
-  update(@Param('id') id: string, @Body() body: any) {
+  update(@Param('id') id: string, @Body() body: UpdateQuestionDto) {
     return this.questionsService.update(id, body);
   }
 
@@ -43,8 +44,8 @@ export class QuestionsController {
 
   @Roles('admin', 'teacher')
   @Post('batch-delete')
-  batchDelete(@Body('ids') ids: string[]) {
-    return this.questionsService.batchDelete(ids);
+  batchDelete(@Body() body: BatchDeleteDto) {
+    return this.questionsService.batchDelete(body.ids);
   }
 
   @Roles('admin', 'teacher')

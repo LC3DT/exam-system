@@ -10,6 +10,15 @@ function fromJson(value: string | null): any {
   return JSON.parse(value);
 }
 
+function fisherYatesShuffle<T>(arr: T[]): T[] {
+  const shuffled = [...arr];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
 @Injectable()
 export class QuestionsService {
   constructor(private prisma: PrismaService) {}
@@ -113,9 +122,21 @@ export class QuestionsService {
     const results = { total: questions.length, success: 0, failed: 0, errors: [] as any[] };
     for (const q of questions) {
       try {
-        await this.create(q, creatorId);
+        await this.prisma.question.create({
+          data: {
+            type: q.type,
+            content: toJson(q.content),
+            options: q.options ? toJson(q.options) : null,
+            answer: toJson(q.answer),
+            knowledgePoint: q.knowledgePoint,
+            difficulty: q.difficulty,
+            estimatedTime: q.estimatedTime,
+            tags: q.tags ? toJson(q.tags) : '[]',
+            creatorId,
+          },
+        });
         results.success++;
-      } catch (e) {
+      } catch (e: any) {
         results.failed++;
         results.errors.push({ error: e.message });
       }
@@ -132,29 +153,47 @@ export class QuestionsService {
 
   async importFromExcel(rows: any[], creatorId: string) {
     const results = { total: rows.length, success: 0, failed: 0, errors: [] as any[] };
+
+    const questionData: Array<{ type: string; content: string; options: string | null; answer: string; knowledgePoint: string; difficulty: number; estimatedTime: number; tags: string; creatorId: string; status: string }> = [];
     for (const [index, row] of rows.entries()) {
       try {
         const question = {
-          type: row['题型'] || row['type'] || 'single',
-          content: { text: row['题目内容'] || row['content'] || '' },
-          options: row['选项'] ? JSON.parse(row['选项']) : (row['options'] ? JSON.parse(row['options']) : null),
-          answer: { correct: row['答案'] || row['answer'] || '' },
-          knowledgePoint: row['知识点'] || row['knowledgePoint'] || '',
+          type: (row['题型'] || row['type'] || 'single') as string,
+          content: toJson({ text: (row['题目内容'] || row['content'] || '') as string }),
+          options: row['选项']
+            ? toJson(typeof row['选项'] === 'string' ? JSON.parse(row['选项']) : row['选项'])
+            : row['options']
+            ? toJson(typeof row['options'] === 'string' ? JSON.parse(row['options']) : row['options'])
+            : null,
+          answer: toJson({ correct: (row['答案'] || row['answer'] || '') as string }),
+          knowledgePoint: (row['知识点'] || row['knowledgePoint'] || '') as string,
           difficulty: parseFloat(row['难度'] || row['difficulty'] || '0.5'),
           estimatedTime: parseInt(row['预计用时'] || row['estimatedTime'] || '60'),
-          tags: (row['标签'] || row['tags'] || '').split(',').filter(Boolean),
+          tags: toJson(((row['标签'] || row['tags'] || '') as string).split(',').filter(Boolean)),
+          creatorId,
+          status: 'published',
         };
-        await this.create(question, creatorId);
+        questionData.push(question);
         results.success++;
-      } catch (e) {
+      } catch (e: any) {
         results.failed++;
         results.errors.push({ row: index + 2, error: e.message });
       }
     }
+
+    if (questionData.length > 0) {
+      await this.prisma.question.createMany({ data: questionData });
+    }
+
     return results;
   }
 
-  async getByStrategy(strategy: { knowledgePoint: string; difficultyMin: number; difficultyMax: number; count: number }) {
+  async getByStrategy(strategy: {
+    knowledgePoint: string;
+    difficultyMin: number;
+    difficultyMax: number;
+    count: number;
+  }) {
     const candidates = await this.prisma.question.findMany({
       where: {
         status: 'published',
@@ -169,7 +208,7 @@ export class QuestionsService {
       );
     }
 
-    const shuffled = candidates.sort(() => Math.random() - 0.5);
+    const shuffled = fisherYatesShuffle(candidates);
     return shuffled.slice(0, strategy.count).map((q) => ({
       ...q,
       content: fromJson(q.content),

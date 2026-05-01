@@ -12,12 +12,14 @@
   "dependencies": {
     "@exam/shared": "*",
     "axios": "^1.6.7",
+    "dompurify": "^3.4.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.22.0",
     "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@types/dompurify": "^3.0.5",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.2.0",

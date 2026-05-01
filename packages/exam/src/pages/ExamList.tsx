@@ -17,6 +17,7 @@ const ExamList: React.FC = () => {
   const navigate = useNavigate();
   const [exams, setExams] = React.useState<ExamInfo[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState('');
 
   React.useEffect(() => {
     const fetchExams = async () => {
@@ -26,8 +27,9 @@ const ExamList: React.FC = () => {
           (e: ExamInfo) => e.status === 'published' || e.status === 'ongoing',
         );
         setExams(available);
-      } catch {
-        // ignore
+      } catch (err) {
+        console.error('Failed to load exams:', err);
+        setError('加载考试列表失败，请刷新重试');
       } finally {
         setLoading(false);
       }
@@ -39,6 +41,14 @@ const ExamList: React.FC = () => {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#f0f2f5' }}>
         <p style={{ fontSize: 16, color: '#999' }}>加载中...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#f0f2f5', flexDirection: 'column', gap: 16 }}>
+        <p style={{ fontSize: 16, color: '#ff4d4f' }}>{error}</p>
       </div>
     );
   }

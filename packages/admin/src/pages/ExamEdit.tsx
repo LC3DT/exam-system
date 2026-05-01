@@ -14,6 +14,7 @@ const ExamEdit: React.FC = () => {
   const [loading, setLoading] = React.useState(false);
   const [sections, setSections] = React.useState<any[]>([]);
   const isNew = !id || id === 'new';
+  const paperMode = Form.useWatch('paperMode', form);
 
   React.useEffect(() => {
     if (!isNew) {
@@ -25,58 +26,80 @@ const ExamEdit: React.FC = () => {
           endTime: dayjs(exam.endTime),
         });
         setSections(exam.sections || []);
+      }).catch((err) => {
+        console.error('Failed to load exam:', err);
+        message.error('加载试卷失败');
       });
     }
   }, [id]);
 
-  const addSection = () => {
-    setSections([...sections, { name: '', scorePerQuestion: 5, fixedQuestionIds: [], randomStrategies: [] }]);
-  };
+  const addSection = React.useCallback(() => {
+    setSections((prev) => [...prev, { name: '', scorePerQuestion: 5, fixedQuestionIds: [], randomStrategies: [] }]);
+  }, []);
 
-  const removeSection = (index: number) => {
-    setSections(sections.filter((_, i) => i !== index));
-  };
+  const removeSection = React.useCallback((index: number) => {
+    setSections((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
-  const updateSection = (index: number, field: string, value: any) => {
-    const updated = [...sections];
-    updated[index] = { ...updated[index], [field]: value };
-    setSections(updated);
-  };
+  const updateSection = React.useCallback((index: number, field: string, value: any) => {
+    setSections((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      return updated;
+    });
+  }, []);
 
-  const handleSave = async () => {
+  const buildPayload = React.useCallback(async () => {
     const values = await form.validateFields();
-    const payload = {
+    return {
       ...values,
       startTime: values.startTime.toISOString(),
       endTime: values.endTime.toISOString(),
       sections,
     };
+  }, [form, sections]);
 
+  const handleSave = React.useCallback(async () => {
+    const payload = await buildPayload();
     setLoading(true);
     try {
       if (isNew) {
         await api.post('/exams', payload);
         message.success('创建成功');
+        navigate('/exams');
       } else {
         await api.put(`/exams/${id}`, payload);
         message.success('保存成功');
+        navigate('/exams');
       }
-      navigate('/exams');
-    } catch {
-      message.error('操作失败');
+    } catch (err: any) {
+      console.error('Save failed:', err);
+      message.error(err.response?.data?.message || '操作失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [buildPayload, isNew, id, navigate]);
 
-  const handlePublish = async () => {
-    await handleSave();
-    if (id) {
-      await api.post(`/exams/${id}/publish`);
+  const handlePublish = React.useCallback(async () => {
+    const payload = await buildPayload();
+    setLoading(true);
+    try {
+      if (isNew) {
+        const res = await api.post('/exams', payload);
+        await api.post(`/exams/${res.data.id}/publish`);
+      } else {
+        await api.put(`/exams/${id}`, payload);
+        await api.post(`/exams/${id}/publish`);
+      }
       message.success('已发布');
       navigate('/exams');
+    } catch (err: any) {
+      console.error('Publish failed:', err);
+      message.error(err.response?.data?.message || '操作失败');
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [buildPayload, isNew, id, navigate]);
 
   return (
     <div>

@@ -2,6 +2,20 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { QuestionsService } from '../questions/questions.service';
 
+function fisherYatesShuffle<T>(arr: T[]): T[] {
+  const shuffled = [...arr];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+function safeParse(v: any): any {
+  if (typeof v !== 'string') return v;
+  try { return JSON.parse(v); } catch { return v; }
+}
+
 @Injectable()
 export class ExamsService {
   constructor(
@@ -84,33 +98,36 @@ export class ExamsService {
     const exam = await this.getById(id);
     if (exam.status !== 'draft') throw new BadRequestException('只有草稿状态的试卷可以编辑');
 
-    await this.prisma.examSection.deleteMany({ where: { examId: id } });
-
     const { sections, ...examData } = data;
-    return this.prisma.exam.update({
-      where: { id },
-      data: {
-        ...examData,
-        sections: {
-          create: sections.map((s: any, i: number) => ({
-            name: s.name,
-            scorePerQuestion: s.scorePerQuestion,
-            orderIndex: i,
-            questions: data.paperMode === 'fixed' && s.fixedQuestionIds
-              ? { create: s.fixedQuestionIds.map((qid: string, qi: number) => ({ questionId: qid, orderIndex: qi })) }
-              : undefined,
-            strategies: data.paperMode === 'random' && s.randomStrategies
-              ? { create: s.randomStrategies.map((rs: any) => ({
-                  knowledgePoint: rs.knowledgePoint,
-                  difficultyMin: rs.difficultyMin ?? rs.difficulty?.min ?? 0,
-                  difficultyMax: rs.difficultyMax ?? rs.difficulty?.max ?? 1,
-                  count: rs.count,
-                })) }
-              : undefined,
-          })),
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.examSection.deleteMany({ where: { examId: id } });
+
+      return tx.exam.update({
+        where: { id },
+        data: {
+          ...examData,
+          sections: {
+            create: sections.map((s: any, i: number) => ({
+              name: s.name,
+              scorePerQuestion: s.scorePerQuestion,
+              orderIndex: i,
+              questions: data.paperMode === 'fixed' && s.fixedQuestionIds
+                ? { create: s.fixedQuestionIds.map((qid: string, qi: number) => ({ questionId: qid, orderIndex: qi })) }
+                : undefined,
+              strategies: data.paperMode === 'random' && s.randomStrategies
+                ? { create: s.randomStrategies.map((rs: any) => ({
+                    knowledgePoint: rs.knowledgePoint,
+                    difficultyMin: rs.difficultyMin ?? rs.difficulty?.min ?? 0,
+                    difficultyMax: rs.difficultyMax ?? rs.difficulty?.max ?? 1,
+                    count: rs.count,
+                  })) }
+                : undefined,
+            })),
+          },
         },
-      },
-      include: { sections: { include: { questions: true, strategies: true } } },
+        include: { sections: { include: { questions: true, strategies: true } } },
+      });
     });
   }
 
@@ -241,26 +258,31 @@ export class ExamsService {
       questionList.sort(() => Math.random() - 0.5);
     }
 
-    const instance = await this.prisma.examInstance.create({
-      data: {
-        examId,
-        studentId,
-        questions: JSON.stringify(questionList.map((q) => ({ questionId: q.questionId, order: q.order }))),
-      },
-    });
+    const questionPayload = questionList.map((q) => ({ questionId: q.questionId, order: q.order }));
 
-    for (const q of questionList) {
-      await this.prisma.examAnswer.create({
+    const instance = await this.prisma.$transaction(async (tx) => {
+      const inst = await tx.examInstance.create({
         data: {
-          instanceId: instance.id,
-          questionId: q.questionId,
-          status: 'unanswered',
+          examId,
+          studentId,
+          questions: JSON.stringify(questionPayload),
         },
       });
-    }
 
-    const parsed = safeParse(instance.questions);
-    const enriched = await this.enrichQuestions(parsed);
+      if (questionList.length > 0) {
+        await tx.examAnswer.createMany({
+          data: questionList.map((q) => ({
+            instanceId: inst.id,
+            questionId: q.questionId,
+            status: 'unanswered',
+          })),
+        });
+      }
+
+      return inst;
+    });
+
+    const enriched = await this.enrichQuestions(questionPayload);
     return { ...instance, questions: enriched, durationMinutes: exam.durationMinutes };
   }
 
@@ -283,9 +305,4 @@ export class ExamsService {
       };
     });
   }
-}
-
-function safeParse(v: any): any {
-  if (typeof v !== 'string') return v;
-  try { return JSON.parse(v); } catch { return v; }
 }

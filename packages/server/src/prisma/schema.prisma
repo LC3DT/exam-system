@@ -56,6 +56,10 @@ model Question {
 
   examSections    ExamSectionQuestion[]
   examAnswers     ExamAnswer[]
+
+  @@index([knowledgePoint, difficulty, status])
+  @@index([status])
+  @@index([type])
 }
 
 model Exam {
@@ -77,6 +81,8 @@ model Exam {
   sections    ExamSection[]
   instances   ExamInstance[]
   sessions    ExamSession[]
+
+  @@index([status])
 }
 
 model ExamSection {
@@ -90,6 +96,8 @@ model ExamSection {
 
   questions ExamSectionQuestion[]
   strategies ExamStrategy[]
+
+  @@index([examId])
 }
 
 model ExamSectionQuestion {
@@ -99,6 +107,9 @@ model ExamSectionQuestion {
   questionId  String
   question    Question @relation(fields: [questionId], references: [id])
   orderIndex  Int
+
+  @@index([sectionId])
+  @@index([questionId])
 }
 
 model ExamStrategy {
@@ -109,6 +120,8 @@ model ExamStrategy {
   difficultyMin   Float
   difficultyMax   Float
   count           Int
+
+  @@index([sectionId])
 }
 
 model ExamInstance {
@@ -120,6 +133,10 @@ model ExamInstance {
   createdAt DateTime @default(now())
 
   answers ExamAnswer[]
+
+  @@index([examId, studentId])
+  @@index([examId])
+  @@index([studentId])
 }
 
 model ExamAnswer {
@@ -133,6 +150,10 @@ model ExamAnswer {
   status       String   @default("unanswered")
   markedForReview Boolean @default(false)
   updatedAt    DateTime @updatedAt
+
+  @@unique([instanceId, questionId])
+  @@index([instanceId])
+  @@index([questionId])
 }
 
 model ExamSession {
@@ -151,6 +172,11 @@ model ExamSession {
   updatedAt   DateTime @updatedAt
 
   violations Violation[]
+
+  @@index([examId, status])
+  @@index([studentId])
+  @@index([examId, studentId])
+  @@index([status])
 }
 
 model Violation {
@@ -162,6 +188,9 @@ model Violation {
   type        String
   description String?
   detectedAt  DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([detectedAt])
 }
 
 model GradingTask {
@@ -178,6 +207,10 @@ model GradingTask {
   status      String   @default("pending")
   assignedAt  DateTime @default(now())
   completedAt DateTime?
+
+  @@index([graderId, status])
+  @@index([examId])
+  @@index([answerId])
 }
 
 model AuditLog {

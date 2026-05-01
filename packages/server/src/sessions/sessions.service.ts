@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Inject, Logger, Opt
 import { PrismaService } from '../prisma/prisma.service';
 import { REDIS_CLIENT } from '../redis/redis.module';
 import Redis from 'ioredis';
+import { SessionsGateway } from './sessions.gateway';
 
 @Injectable()
 export class SessionsService {
@@ -10,6 +11,7 @@ export class SessionsService {
   constructor(
     private prisma: PrismaService,
     @Optional() @Inject(REDIS_CLIENT) private redis: Redis | null,
+    @Optional() private gateway?: SessionsGateway,
   ) {}
 
   private get redisAvailable(): boolean {
@@ -45,25 +47,33 @@ export class SessionsService {
     });
     if (!session) return;
 
-    const instanceId = session.instanceId || (
-      await this.prisma.examInstance.findFirst({
+    let instanceId: string | null = session.instanceId ?? null;
+    if (!instanceId) {
+      const instance = await this.prisma.examInstance.findFirst({
         where: { examId: session.examId, studentId: session.studentId },
         select: { id: true },
-      })
-    )?.id;
-
+      });
+      instanceId = instance?.id ?? null;
+    }
     if (!instanceId) return;
 
-    const instanceAnswer = await this.prisma.examAnswer.findFirst({
-      where: { instanceId, questionId },
+    await this.prisma.examAnswer.upsert({
+      where: {
+        instanceId_questionId: { instanceId, questionId },
+      },
+      create: {
+        instanceId,
+        questionId,
+        answer: JSON.stringify(answer),
+        status: 'answered',
+        markedForReview,
+      },
+      update: {
+        answer: JSON.stringify(answer),
+        status: 'answered',
+        markedForReview,
+      },
     });
-
-    if (instanceAnswer) {
-      await this.prisma.examAnswer.update({
-        where: { id: instanceAnswer.id },
-        data: { answer: JSON.stringify(answer), status: 'answered', markedForReview },
-      });
-    }
   }
 
   async getCachedAnswers(sessionId: string) {
@@ -82,13 +92,16 @@ export class SessionsService {
   async submitExam(sessionId: string) {
     const session = await this.prisma.examSession.findUnique({
       where: { id: sessionId },
+      include: { exam: { select: { id: true, totalScore: true } } },
     });
     if (!session) throw new NotFoundException('考试会话不存在');
     if (session.status !== 'active') throw new BadRequestException('考试已结束');
 
-    await this.prisma.examSession.update({
-      where: { id: sessionId },
-      data: { status: 'submitted', submittedAt: new Date() },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.examSession.update({
+        where: { id: sessionId },
+        data: { status: 'submitted', submittedAt: new Date() },
+      });
     });
 
     if (this.redisAvailable) {
@@ -100,20 +113,19 @@ export class SessionsService {
 
     const instance = await this.prisma.examInstance.findFirst({
       where: { examId: session.examId, studentId: session.studentId },
-      include: { answers: true },
+      select: { answers: { select: { score: true } } },
     });
 
     const totalScore = instance?.answers.reduce((sum, a) => sum + (a.score || 0), 0) || 0;
 
-    const exam = await this.prisma.exam.findUnique({
-      where: { id: session.examId },
-      select: { totalScore: true },
-    });
+    if (this.gateway) {
+      try { this.gateway.broadcastStatus(session.examId, { type: 'submit', studentId: session.studentId }); } catch {}
+    }
 
     return {
       message: '交卷成功',
       score: totalScore,
-      total: exam?.totalScore || 100,
+      total: session.exam.totalScore || 100,
       submittedAt: new Date(),
     };
   }
@@ -121,111 +133,146 @@ export class SessionsService {
   async autoGrade(examId: string, studentId: string) {
     const instance = await this.prisma.examInstance.findFirst({
       where: { examId, studentId },
-      include: { answers: { include: { question: true } } },
+      include: {
+        answers: { include: { question: true } },
+        exam: {
+          select: {
+            sections: {
+              select: {
+                scorePerQuestion: true,
+                questions: { select: { questionId: true } },
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!instance) return;
 
-    const sections = await this.prisma.examSection.findMany({
-      where: { examId },
-      include: { questions: true },
-    });
-
     const questionScoreMap = new Map<string, number>();
-    for (const section of sections) {
+    for (const section of instance.exam.sections) {
       for (const eq of section.questions) {
         questionScoreMap.set(eq.questionId, section.scorePerQuestion);
       }
     }
 
+    const updates: Array<{ id: string; score: number }> = [];
     for (const answer of instance.answers) {
-      if (['single', 'multiple', 'judge'].includes(answer.question.type)) {
-        let correctAnswer: any;
-        try {
-          correctAnswer = JSON.parse(answer.question.answer).correct;
-        } catch {
-          correctAnswer = answer.question.answer;
-        }
+      if (!['single', 'multiple', 'judge'].includes(answer.question.type)) continue;
 
-        let studentAnswer: any;
-        try {
-          studentAnswer = answer.answer ? JSON.parse(answer.answer).correct : null;
-        } catch {
-          studentAnswer = answer.answer;
-        }
+      let correctAnswer: any;
+      try { correctAnswer = JSON.parse(answer.question.answer).correct; } catch { correctAnswer = answer.question.answer; }
 
-        const perQuestionScore = questionScoreMap.get(answer.questionId) || 5;
-        let score = 0;
+      let studentAnswer: any;
+      try { studentAnswer = answer.answer ? JSON.parse(answer.answer).correct : null; } catch { studentAnswer = answer.answer; }
 
-        if (answer.question.type === 'multiple') {
-          const correct = Array.isArray(correctAnswer) ? correctAnswer.sort().join(',') : String(correctAnswer);
-          const student = Array.isArray(studentAnswer) ? studentAnswer.sort().join(',') : String(studentAnswer);
-          score = correct === student ? perQuestionScore : 0;
-        } else {
-          score = String(correctAnswer) === String(studentAnswer ?? '') ? perQuestionScore : 0;
-        }
+      const perQuestionScore = questionScoreMap.get(answer.questionId) || 5;
+      let score = 0;
 
-        await this.prisma.examAnswer.update({
-          where: { id: answer.id },
-          data: { score },
-        });
+      if (answer.question.type === 'multiple') {
+        const correct = Array.isArray(correctAnswer) ? correctAnswer.sort().join(',') : String(correctAnswer);
+        const student = Array.isArray(studentAnswer) ? studentAnswer.sort().join(',') : String(studentAnswer);
+        score = correct === student ? perQuestionScore : 0;
+      } else {
+        score = String(correctAnswer) === String(studentAnswer ?? '') ? perQuestionScore : 0;
       }
+
+      updates.push({ id: answer.id, score });
+    }
+
+    if (updates.length > 0) {
+      await this.prisma.$transaction(
+        updates.map((u) =>
+          this.prisma.examAnswer.update({ where: { id: u.id }, data: { score: u.score } }),
+        ),
+      );
     }
   }
 
   async recordViolation(sessionId: string, studentId: string, type: string, description?: string) {
-    const violation = await this.prisma.violation.create({
-      data: { sessionId, studentId, type, description },
+    const [violation] = await this.prisma.$transaction([
+      this.prisma.violation.create({ data: { sessionId, studentId, type, description } }),
+      this.prisma.examSession.update({
+        where: { id: sessionId },
+        data: { violationCount: { increment: 1 } },
+      }),
+    ]);
+
+    const session = await this.prisma.examSession.findUnique({
+      where: { id: sessionId },
+      select: { examId: true },
     });
 
-    await this.prisma.examSession.update({
-      where: { id: sessionId },
-      data: { violationCount: { increment: 1 } },
-    });
+    if (this.gateway && session) {
+      try {
+        this.gateway.broadcastViolation(session.examId, {
+          id: violation.id,
+          type: violation.type,
+          description: violation.description,
+          studentId,
+          detectedAt: violation.detectedAt,
+        });
+      } catch {}
+    }
 
     return violation;
   }
 
   async getLiveStatus(examId: string) {
-    const sessions = await this.prisma.examSession.findMany({
-      where: { examId },
-      include: { student: { select: { id: true, realName: true } } },
-    });
-
-    const onlineCount = sessions.filter((s) => s.status === 'active').length;
-    const submittedCount = sessions.filter((s) => s.status === 'submitted').length;
-    const terminatedCount = sessions.filter((s) => s.status === 'terminated').length;
-
-    const violations = await this.prisma.violation.findMany({
-      where: {
-        session: { examId, status: 'active' },
-        detectedAt: { gte: new Date(Date.now() - 60000) },
-      },
-      include: { student: { select: { id: true, realName: true } } },
-      take: 50,
-      orderBy: { detectedAt: 'desc' },
-    });
+    const [sessions, violations] = await Promise.all([
+      this.prisma.examSession.findMany({
+        where: { examId },
+        select: {
+          status: true,
+          student: { select: { id: true, realName: true } },
+        },
+      }),
+      this.prisma.violation.findMany({
+        where: {
+          session: { examId, status: 'active' },
+          detectedAt: { gte: new Date(Date.now() - 60000) },
+        },
+        include: { student: { select: { id: true, realName: true } } },
+        take: 50,
+        orderBy: { detectedAt: 'desc' },
+      }),
+    ]);
 
     return {
       total: sessions.length,
-      onlineCount,
-      submittedCount,
-      terminatedCount,
+      onlineCount: sessions.filter((s) => s.status === 'active').length,
+      submittedCount: sessions.filter((s) => s.status === 'submitted').length,
+      terminatedCount: sessions.filter((s) => s.status === 'terminated').length,
       recentViolations: violations,
     };
   }
 
   async terminateSession(sessionId: string, reason: string) {
-    await this.prisma.examSession.update({
+    const session = await this.prisma.examSession.update({
       where: { id: sessionId },
       data: { status: 'terminated', submittedAt: new Date() },
+      select: { examId: true },
     });
+
+    if (this.gateway) {
+      try { this.gateway.broadcastStatus(session.examId, { type: 'terminate', sessionId, reason }); } catch {}
+    }
+
     return { message: '已强制收卷' };
   }
 
   async extendTime(sessionId: string, extraMinutes: number) {
-    const session = await this.prisma.examSession.findUnique({ where: { id: sessionId } });
+    const session = await this.prisma.examSession.findUnique({
+      where: { id: sessionId },
+      select: { examId: true },
+    });
     if (!session) throw new NotFoundException('会话不存在');
+
+    if (this.gateway) {
+      try { this.gateway.broadcastStatus(session.examId, { type: 'extend', sessionId, extraMinutes }); } catch {}
+    }
+
     return { message: '已延长作答时间', extraMinutes };
   }
 }

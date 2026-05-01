@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export class GradingService {
   constructor(private prisma: PrismaService) {}
 
-  async assignGrading(examId: string, sectionId: string, graiderIds: string[], assignedBy: string) {
+  async assignGrading(examId: string, sectionId: string, graderIds: string[], assignedBy: string) {
     const answers = await this.prisma.examAnswer.findMany({
       where: {
         instance: { examId },
@@ -17,20 +17,20 @@ export class GradingService {
       },
     });
 
-    const tasks: any[] = [];
-    for (let i = 0; i < answers.length; i++) {
-      tasks.push({
-        answerId: answers[i].id,
-        sectionId,
-        examId,
-        graderId: graiderIds[i % graiderIds.length],
-        assignedBy,
-        status: 'pending',
-      });
+    const tasks = answers.map((a, i) => ({
+      answerId: a.id,
+      sectionId,
+      examId,
+      graderId: graderIds[i % graderIds.length],
+      assignedBy,
+      status: 'pending',
+    }));
+
+    if (tasks.length > 0) {
+      await this.prisma.gradingTask.createMany({ data: tasks });
     }
 
-    await this.prisma.gradingTask.createMany({ data: tasks });
-    return { assigned: tasks.length, graders: graiderIds.length };
+    return { assigned: tasks.length, graders: graderIds.length };
   }
 
   async getPendingTasks(graderId: string) {
@@ -49,15 +49,16 @@ export class GradingService {
     if (!task) throw new NotFoundException('阅卷任务不存在');
     if (task.graderId !== graderId) throw new NotFoundException('无权批阅此题目');
 
-    await this.prisma.gradingTask.update({
-      where: { id: taskId },
-      data: { score, comment, status: 'completed', completedAt: new Date() },
-    });
-
-    await this.prisma.examAnswer.update({
-      where: { id: task.answerId },
-      data: { score },
-    });
+    await this.prisma.$transaction([
+      this.prisma.gradingTask.update({
+        where: { id: taskId },
+        data: { score, comment, status: 'completed', completedAt: new Date() },
+      }),
+      this.prisma.examAnswer.update({
+        where: { id: task.answerId },
+        data: { score },
+      }),
+    ]);
 
     return { message: '评分成功' };
   }

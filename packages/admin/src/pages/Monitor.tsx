@@ -5,30 +5,46 @@ import api from '../api/client';
 
 const { Title } = Typography;
 
+const violationColumns = [
+  { title: '考生', dataIndex: ['student', 'realName'] },
+  { title: '类型', dataIndex: 'type', render: (v: string) => <Tag color="red">{v}</Tag> },
+  { title: '描述', dataIndex: 'description' },
+  { title: '时间', dataIndex: 'detectedAt', render: (v: string) => new Date(v).toLocaleTimeString() },
+];
+
 const Monitor: React.FC = () => {
   const [exams, setExams] = React.useState<any[]>([]);
   const [selectedExam, setSelectedExam] = React.useState<string | null>(null);
   const [liveData, setLiveData] = React.useState<any>(null);
 
   React.useEffect(() => {
-    api.get('/exams', { params: { status: 'ongoing' } }).then((res) => setExams(res.data.items));
+    api.get('/exams', { params: { status: 'ongoing' } }).then((res) => setExams(res.data.items)).catch((err) => console.error('Failed to load exams:', err));
   }, []);
 
   React.useEffect(() => {
     if (!selectedExam) return;
-    const timer = setInterval(async () => {
+    const fetchStatus = async () => {
       try {
         const res = await api.get(`/sessions/${selectedExam}/live`);
         setLiveData(res.data);
-      } catch {}
-    }, 3000);
+      } catch (err) {
+        console.error('Polling error:', err);
+      }
+    };
+    fetchStatus();
+    const timer = setInterval(fetchStatus, 3000);
     return () => clearInterval(timer);
   }, [selectedExam]);
 
-  const handleTerminate = async (sessionId: string) => {
-    await api.post(`/sessions/${sessionId}/terminate`, { reason: '管理员强制收卷' });
-    message.success('已强制收卷');
-  };
+  const handleTerminate = React.useCallback(async (sessionId: string) => {
+    try {
+      await api.post(`/sessions/${sessionId}/terminate`, { reason: '管理员强制收卷' });
+      message.success('已强制收卷');
+    } catch (err) {
+      console.error('Terminate failed:', err);
+      message.error('操作失败');
+    }
+  }, []);
 
   return (
     <div>
@@ -49,11 +65,10 @@ const Monitor: React.FC = () => {
           <Card title="违规记录" style={{ marginBottom: 16 }}>
             {liveData.recentViolations?.length > 0 ? (
               <Table rowKey="id" dataSource={liveData.recentViolations} columns={[
-                { title: '考生', dataIndex: ['student', 'realName'] },
-                { title: '类型', dataIndex: 'type', render: (v: string) => <Tag color="red">{v}</Tag> },
-                { title: '描述', dataIndex: 'description' },
-                { title: '时间', dataIndex: 'detectedAt', render: (v: string) => new Date(v).toLocaleTimeString() },
-                { title: '操作', render: () => <Button size="small" danger icon={<StopOutlined />}>强制收卷</Button> },
+                ...violationColumns,
+                { title: '操作', render: (_: any, record: any) => (
+                  <Button size="small" danger icon={<StopOutlined />} onClick={() => handleTerminate(record.id)}>强制收卷</Button>
+                )},
               ]} size="small" />
             ) : <span style={{ color: '#999' }}>暂无违规记录</span>}
           </Card>

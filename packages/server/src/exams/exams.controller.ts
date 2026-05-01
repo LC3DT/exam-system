@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Param, Query, Body, UseGuards, Request } fr
 import { AuthGuard } from '@nestjs/passport';
 import { ExamsService } from './exams.service';
 import { Roles, RolesGuard } from '../common/guards/roles.guard';
+import { CreateExamDto, UpdateExamDto } from '@exam/shared';
 
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('exams')
@@ -22,13 +23,13 @@ export class ExamsController {
 
   @Roles('admin', 'teacher')
   @Post()
-  create(@Body() body: any, @Request() req) {
+  create(@Body() body: CreateExamDto, @Request() req) {
     return this.examsService.create(body, req.user.id);
   }
 
   @Roles('admin', 'teacher')
   @Put(':id')
-  update(@Param('id') id: string, @Body() body: any) {
+  update(@Param('id') id: string, @Body() body: UpdateExamDto) {
     return this.examsService.update(id, body);
   }
 

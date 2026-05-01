@@ -6,33 +6,31 @@ export class ReportsService {
   constructor(private prisma: PrismaService) {}
 
   async examReport(examId: string) {
-    const exam = await this.prisma.exam.findUnique({
-      where: { id: examId },
-      include: {
-        sessions: {
-          where: { status: 'submitted' },
-          include: { student: { select: { realName: true } } },
+    const [exam, instances] = await Promise.all([
+      this.prisma.exam.findUnique({
+        where: { id: examId },
+        select: { title: true, totalScore: true },
+      }),
+      this.prisma.examInstance.findMany({
+        where: { examId },
+        select: {
+          answers: { select: { score: true } },
         },
-      },
-    });
+      }),
+    ]);
 
     if (!exam) return null;
 
-    const instances = await this.prisma.examInstance.findMany({
-      where: { examId },
-      include: { answers: true },
-    });
-
-    const scores: number[] = [];
-    for (const instance of instances) {
-      const totalScore = instance.answers.reduce((sum, a) => sum + (a.score || 0), 0);
-      scores.push(totalScore);
-    }
+    const scores: number[] = instances.map(
+      (inst) => inst.answers.reduce((sum, a) => sum + (a.score || 0), 0),
+    );
 
     scores.sort((a, b) => a - b);
     const highest = scores.length > 0 ? scores[scores.length - 1] : 0;
     const lowest = scores.length > 0 ? scores[0] : 0;
-    const average = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length * 100) / 100 : 0;
+    const average = scores.length > 0
+      ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length * 100) / 100
+      : 0;
     const passCount = scores.filter((s) => s >= exam.totalScore * 0.6).length;
     const passRate = scores.length > 0 ? Math.round(passCount / scores.length * 100) / 100 : 0;
 
@@ -53,7 +51,11 @@ export class ReportsService {
   async questionAnalysis(examId: string) {
     const questions = await this.prisma.question.findMany({
       where: { examSections: { some: { section: { examId } } } },
-      include: {
+      select: {
+        id: true,
+        type: true,
+        knowledgePoint: true,
+        difficulty: true,
         examAnswers: {
           where: { instance: { examId } },
           select: { score: true },
@@ -64,8 +66,8 @@ export class ReportsService {
     return questions.map((q) => {
       const total = q.examAnswers.length;
       const correctCount = q.examAnswers.filter((a) => (a.score || 0) > 0).length;
-      const discrimination = total > 0 ? Math.round(correctCount / total * 100) / 100 : 0;
-      const isAnomalous = total > 0 && (discrimination < 0.1 || discrimination > 0.95);
+      const correctRate = total > 0 ? Math.round(correctCount / total * 100) / 100 : 0;
+      const isAnomalous = total > 0 && (correctRate < 0.1 || correctRate > 0.95);
 
       return {
         id: q.id,
@@ -73,7 +75,7 @@ export class ReportsService {
         knowledgePoint: q.knowledgePoint,
         difficulty: q.difficulty,
         totalAnswers: total,
-        correctRate: discrimination,
+        correctRate,
         isAnomalous,
       };
     });

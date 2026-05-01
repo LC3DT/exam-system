@@ -6,7 +6,7 @@
       "cwd": "./",
       "env": {
         "DATABASE_URL": "file:./dev.db",
-        "JWT_SECRET": "exam-system-secret-key-2024"
+        "JWT_SECRET": "${JWT_SECRET:-exam-system-secret-key-2024}"
       },
       "instances": 1,
       "autorestart": true,
@@ -17,14 +17,20 @@
       "script": "npx",
       "args": "vite --port 5173 --host 0.0.0.0",
       "cwd": "packages/admin",
-      "autorestart": true
+      "autorestart": true,
+      "env": {
+        "NODE_ENV": "development"
+      }
     },
     {
       "name": "exam-portal",
       "script": "npx",
       "args": "vite --port 5174 --host 0.0.0.0",
       "cwd": "packages/exam",
-      "autorestart": true
+      "autorestart": true,
+      "env": {
+        "NODE_ENV": "development"
+      }
     }
   ]
 }

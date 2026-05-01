@@ -1,5 +1,5 @@
 import React from 'react';
-import { Table, Button, Space, Tag, message, Popconfirm, Typography, Modal } from 'antd';
+import { Table, Button, Space, Tag, message, Typography, Modal } from 'antd';
 import { PlusOutlined, EyeOutlined, EditOutlined, SendOutlined, PlayCircleOutlined, StopOutlined, BarChartOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
@@ -19,29 +19,29 @@ const Exams: React.FC = () => {
   const navigate = useNavigate();
   const [query, setQuery] = React.useState({ page: 1, pageSize: 20 });
 
-  const fetch = async () => {
+  const fetch = React.useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get('/exams', { params: query });
       setData(res.data);
     } finally { setLoading(false); }
-  };
+  }, [query]);
 
-  React.useEffect(() => { fetch(); }, [query]);
+  React.useEffect(() => { fetch(); }, [fetch]);
 
-  const handlePublish = async (id: string) => {
+  const handlePublish = React.useCallback(async (id: string) => {
     await api.post(`/exams/${id}/publish`);
     message.success('已发布');
     fetch();
-  };
+  }, [fetch]);
 
-  const handleStart = async (id: string) => {
+  const handleStart = React.useCallback(async (id: string) => {
     await api.post(`/exams/${id}/start`);
     message.success('已开考，考生可以进入答题');
     fetch();
-  };
+  }, [fetch]);
 
-  const handleFinish = async (id: string) => {
+  const handleFinish = React.useCallback((id: string) => {
     Modal.confirm({
       title: '确认结束考试',
       content: '结束后考生将无法继续答题，确定吗？',
@@ -51,13 +51,13 @@ const Exams: React.FC = () => {
         fetch();
       },
     });
-  };
+  }, [fetch]);
 
-  const handleNavigateReport = (id: string) => {
-    navigate(`/exam/${id}/edit`);
-  };
+  const handlePagination = React.useCallback((p: number, ps: number) => {
+    setQuery({ page: p, pageSize: ps });
+  }, []);
 
-  const columns = [
+  const columns = React.useMemo(() => [
     { title: '试卷名称', dataIndex: 'title' },
     { title: '总分', dataIndex: 'totalScore', width: 80 },
     { title: '时长(分钟)', dataIndex: 'durationMinutes', width: 100 },
@@ -93,7 +93,7 @@ const Exams: React.FC = () => {
         </Space>
       ),
     },
-  ];
+  ], [navigate, handlePublish, handleStart, handleFinish]);
 
   return (
     <div>
@@ -102,7 +102,7 @@ const Exams: React.FC = () => {
         <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/exams/new/edit')}>创建试卷</Button>
       </div>
       <Table rowKey="id" columns={columns} dataSource={data.items} loading={loading}
-        pagination={{ total: data.total, current: query.page, pageSize: query.pageSize, onChange: (p, ps) => setQuery({ page: p, pageSize: ps }) }} />
+        pagination={{ total: data.total, current: query.page, pageSize: query.pageSize, onChange: handlePagination }} />
     </div>
   );
 };

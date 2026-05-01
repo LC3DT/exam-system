@@ -21,9 +21,10 @@ const AdminLayout: React.FC = () => {
   const [collapsed, setCollapsed] = React.useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
 
-  const menuItems = [
+  const menuItems = React.useMemo(() => [
     { key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘' },
     { key: '/questions', icon: <QuestionCircleOutlined />, label: '题库管理' },
     { key: '/exams', icon: <FileTextOutlined />, label: '试卷管理' },
@@ -31,18 +32,18 @@ const AdminLayout: React.FC = () => {
     { key: '/grading', icon: <CheckCircleOutlined />, label: '阅卷管理' },
     { key: '/reports', icon: <BarChartOutlined />, label: '统计分析' },
     { key: '/users', icon: <UserOutlined />, label: '用户管理' },
-  ];
+  ], []);
 
   const currentKey = '/' + location.pathname.split('/')[1];
 
-  const handleLogout = () => {
+  const handleLogout = React.useCallback(() => {
     logout();
     navigate('/login');
-  };
+  }, [logout, navigate]);
 
-  const userMenu = {
+  const userMenu = React.useMemo(() => ({
     items: [{ key: 'logout', icon: <LogoutOutlined />, label: '退出登录', onClick: handleLogout }],
-  };
+  }), [handleLogout]);
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -60,9 +61,18 @@ const AdminLayout: React.FC = () => {
       </Sider>
       <Layout>
         <Header style={{ background: '#fff', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
-          <Button type="text" icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)} />
+          <Button
+            type="text"
+            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={() => setCollapsed(!collapsed)}
+            aria-label={collapsed ? '展开菜单' : '折叠菜单'}
+          />
           <Dropdown menu={userMenu}>
-            <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div
+              role="button"
+              tabIndex={0}
+              style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+            >
               <Avatar icon={<UserOutlined />} />
               <span>{user?.realName || user?.username}</span>
             </div>

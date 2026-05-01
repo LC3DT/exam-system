@@ -9,10 +9,12 @@ const AntiCheatGuard: React.FC<{ examId: string; onReady: () => void }> = ({ exa
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const user = useAuthStore((s) => s.user);
+  const streamRef = React.useRef<MediaStream | null>(null);
 
-  const startCamera = async () => {
+  const startCamera = React.useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
+      streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
@@ -20,22 +22,23 @@ const AntiCheatGuard: React.FC<{ examId: string; onReady: () => void }> = ({ exa
     } catch {
       setError('无法访问摄像头，跳过拍照');
     }
-  };
+  }, []);
 
-  const takePhoto = () => {
+  const takePhoto = React.useCallback(() => {
     if (videoRef.current && canvasRef.current) {
       const ctx = canvasRef.current.getContext('2d');
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0, 320, 240);
-        const dataUrl = canvasRef.current.toDataURL('image/jpeg');
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream?.getTracks().forEach((t) => t.stop());
+        canvasRef.current.toDataURL('image/jpeg');
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => t.stop());
+        }
         setPhotoTaken(true);
       }
     }
-  };
+  }, []);
 
-  const enterFullscreen = async () => {
+  const enterFullscreen = React.useCallback(async () => {
     try {
       await document.documentElement.requestFullscreen();
     } catch {
@@ -43,11 +46,16 @@ const AntiCheatGuard: React.FC<{ examId: string; onReady: () => void }> = ({ exa
     }
     setStep('done');
     onReady();
-  };
+  }, [onReady]);
 
   React.useEffect(() => {
-    if (step === 'photo') startCamera();
-  }, [step]);
+    if (step === 'photo') {
+      startCamera();
+    }
+    return () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, [step, startCamera]);
 
   if (step === 'done') return null;
 
@@ -86,4 +94,4 @@ const AntiCheatGuard: React.FC<{ examId: string; onReady: () => void }> = ({ exa
   );
 };
 
-export default AntiCheatGuard;
+export default React.memo(AntiCheatGuard);

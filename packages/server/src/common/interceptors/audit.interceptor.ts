@@ -25,8 +25,9 @@ export class AuditInterceptor implements NestInterceptor {
               resource,
               resourceId: request.params?.id,
               ipAddress: request.ip,
+              detail: request.body ? JSON.stringify(request.body).slice(0, 1000) : undefined,
             },
-          }).catch(() => {});
+          }).catch((err) => console.error('Audit log failed:', err));
         }
       }),
     );
