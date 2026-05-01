@@ -214,9 +214,11 @@ npm run dev:exam
 | GET | `/exams/:id` | admin, teacher, student | 试卷详情 |
 | POST | `/exams` | admin, teacher | 创建试卷 |
 | PUT | `/exams/:id` | admin, teacher | 编辑试卷 (仅草稿) |
-| POST | `/exams/:id/publish` | admin, teacher | 发布试卷 |
+| POST | `/exams/:id/publish` | admin, teacher | 发布试卷 (draft → published) |
+| POST | `/exams/:id/start` | admin, teacher | 开考 (published/ongoing → ongoing) |
+| POST | `/exams/:id/finish` | admin, teacher | 结束考试 (ongoing/published → finished) |
 | GET | `/exams/:id/preview` | admin, teacher | 试卷分析预览 |
-| POST | `/exams/:id/enter` | admin, teacher, student | 考生进入考试 (生成试卷实例) |
+| POST | `/exams/:id/enter` | admin, teacher, student | 考生进入考试 (生成实例，返回题目快照) |
 
 ### 考试会话
 
@@ -224,7 +226,7 @@ npm run dev:exam
 |------|------|------|------|
 | POST | `/sessions/:examId/start` | 登录用户 | 开始考试会话 |
 | POST | `/sessions/:sessionId/answer` | 登录用户 | 保存答案 (Redis + DB) |
-| POST | `/sessions/:sessionId/submit` | 登录用户 | 交卷 (触发自动批改) |
+| POST | `/sessions/:sessionId/submit` | 登录用户 | 交卷 (自动批改客观题，返回成绩) |
 | GET | `/sessions/:sessionId/answers` | 登录用户 | 获取缓存答案 |
 | POST | `/sessions/:sessionId/violation` | 登录用户 | 记录违规 |
 | GET | `/sessions/:examId/live` | admin, teacher | 实时考场状态 |
@@ -388,6 +390,32 @@ server {
 | 判断 | `{ "correct": true }` |
 | 填空 | `{ "correct": "useState" }` |
 | 主观 | `{ "correct": "" }` |
+
+---
+## 试卷状态机
+
+```
+draft ──[发布]──► published ──[开考]──► ongoing ──[结束]──► finished
+                      │                     │
+                      └─────[开考]──────────┘
+```
+
+| 状态 | 说明 | 可操作 |
+|------|------|--------|
+| **draft** | 草稿 | 编辑、删除、发布 |
+| **published** | 已发布 | 开考、结束 |
+| **ongoing** | 进行中 | 监控、强制收卷、结束 |
+| **finished** | 已结束 | 查看统计报告 |
+
+
+## 自动批改机制
+
+交卷时系统自动批改客观题（单选/多选/判断），每题分数按**所属大题的 `scorePerQuestion`** 计算：
+
+- 开发能力测试: 单选 5分、多选 8分、判断 5分、填空 8分
+- 交卷后即时返回成绩：`{ score: 65, total: 100, message: "交卷成功" }`
+
+主观题（填空/问答/代码）需教师通过阅卷管理手动评分。
 
 ---
 

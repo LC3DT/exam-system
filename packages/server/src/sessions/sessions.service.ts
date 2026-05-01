@@ -41,13 +41,22 @@ export class SessionsService {
 
     const session = await this.prisma.examSession.findUnique({
       where: { id: sessionId },
-      select: { instanceId: true },
+      select: { examId: true, studentId: true, instanceId: true },
     });
-    const instanceAnswer = session?.instanceId
-      ? await this.prisma.examAnswer.findFirst({
-          where: { instanceId: session.instanceId, questionId },
-        })
-      : null;
+    if (!session) return;
+
+    const instanceId = session.instanceId || (
+      await this.prisma.examInstance.findFirst({
+        where: { examId: session.examId, studentId: session.studentId },
+        select: { id: true },
+      })
+    )?.id;
+
+    if (!instanceId) return;
+
+    const instanceAnswer = await this.prisma.examAnswer.findFirst({
+      where: { instanceId, questionId },
+    });
 
     if (instanceAnswer) {
       await this.prisma.examAnswer.update({
@@ -87,9 +96,26 @@ export class SessionsService {
       await this.redis!.del(`session:${sessionId}:answers`);
     }
 
-    this.autoGrade(session.examId, session.studentId).catch((e) => this.logger.error('Auto grade failed', e));
+    await this.autoGrade(session.examId, session.studentId);
 
-    return { message: '交卷成功', submittedAt: new Date() };
+    const instance = await this.prisma.examInstance.findFirst({
+      where: { examId: session.examId, studentId: session.studentId },
+      include: { answers: true },
+    });
+
+    const totalScore = instance?.answers.reduce((sum, a) => sum + (a.score || 0), 0) || 0;
+
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: session.examId },
+      select: { totalScore: true },
+    });
+
+    return {
+      message: '交卷成功',
+      score: totalScore,
+      total: exam?.totalScore || 100,
+      submittedAt: new Date(),
+    };
   }
 
   async autoGrade(examId: string, studentId: string) {
@@ -99,6 +125,18 @@ export class SessionsService {
     });
 
     if (!instance) return;
+
+    const sections = await this.prisma.examSection.findMany({
+      where: { examId },
+      include: { questions: true },
+    });
+
+    const questionScoreMap = new Map<string, number>();
+    for (const section of sections) {
+      for (const eq of section.questions) {
+        questionScoreMap.set(eq.questionId, section.scorePerQuestion);
+      }
+    }
 
     for (const answer of instance.answers) {
       if (['single', 'multiple', 'judge'].includes(answer.question.type)) {
@@ -116,8 +154,8 @@ export class SessionsService {
           studentAnswer = answer.answer;
         }
 
+        const perQuestionScore = questionScoreMap.get(answer.questionId) || 5;
         let score = 0;
-        const perQuestionScore = 5;
 
         if (answer.question.type === 'multiple') {
           const correct = Array.isArray(correctAnswer) ? correctAnswer.sort().join(',') : String(correctAnswer);

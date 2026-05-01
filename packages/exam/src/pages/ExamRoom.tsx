@@ -1,6 +1,7 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { useAuthStore } from '../stores/auth';
 
 interface Question {
   questionId: string;
@@ -14,6 +15,7 @@ interface Question {
 const ExamRoom: React.FC = () => {
   const { examId } = useParams();
   const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
   const [sessionId, setSessionId] = React.useState<string | null>(null);
   const [questions, setQuestions] = React.useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = React.useState(0);
@@ -23,7 +25,7 @@ const ExamRoom: React.FC = () => {
   const [loading, setLoading] = React.useState(true);
   const [submitted, setSubmitted] = React.useState(false);
   const [warning, setWarning] = React.useState('');
-  const [violationCount, setViolationCount] = React.useState(0);
+  const [finalScore, setFinalScore] = React.useState<{ score: number; total: number } | null>(null);
 
   React.useEffect(() => {
     enterExam();
@@ -44,21 +46,12 @@ const ExamRoom: React.FC = () => {
     try {
       const instanceRes = await api.post(`/exams/${examId}/enter`);
       const instance = instanceRes.data;
-      const questionIds = instance.questions.map((q: any) => q.questionId);
+      const questions = instance.questions;
       const sessionRes = await api.post(`/sessions/${examId}/start`);
 
-      const showSubmit = await api.post(`/sessions/${sessionRes.data.id}/violation`, { type: 'exam_start', description: '' });
-
-      const fetchedQuestions = await Promise.all(
-        questionIds.map(async (qid: string) => {
-          const res = await api.get(`/questions/${qid}`);
-          return { ...res.data, questionId: qid };
-        }),
-      );
-
-      setQuestions(fetchedQuestions);
+      setQuestions(questions);
       setSessionId(sessionRes.data.id);
-      setTimeLeft(instance.exam?.durationMinutes * 60 || 3600);
+      setTimeLeft(instance.durationMinutes * 60 || 3600);
     } catch (err: any) {
       setWarning(err.response?.data?.message || '进入考试失败');
     } finally {
@@ -85,11 +78,10 @@ const ExamRoom: React.FC = () => {
     if (!sessionId || submitted) return;
     setSubmitted(true);
     try {
-      await api.post(`/sessions/${sessionId}/submit`);
-      alert('交卷成功！');
-      navigate('/login');
+      const res = await api.post(`/sessions/${sessionId}/submit`);
+      setFinalScore({ score: res.data.score, total: res.data.total });
     } catch {
-      alert('交卷成功！');
+      setFinalScore({ score: 0, total: 100 });
     }
   };
 
@@ -116,12 +108,31 @@ const ExamRoom: React.FC = () => {
   }
 
   if (submitted) {
+    const pct = finalScore ? Math.round((finalScore.score / finalScore.total) * 100) : 0;
+    const passed = pct >= 60;
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#f0f2f5' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
-          <p style={{ fontSize: 24, color: '#52c41a', marginBottom: 8 }}>交卷成功</p>
-          <p style={{ color: '#999' }}>请等待教师批阅</p>
+        <div style={{ textAlign: 'center', background: '#fff', padding: '48px 60px', borderRadius: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.08)' }}>
+          <div style={{ fontSize: 56, marginBottom: 12 }}>{passed ? '🎉' : '📝'}</div>
+          <p style={{ fontSize: 24, fontWeight: 700, color: passed ? '#52c41a' : '#faad14', marginBottom: 4 }}>
+            {passed ? '交卷成功' : '已交卷'}
+          </p>
+          {finalScore && (
+            <>
+              <div style={{ fontSize: 40, fontWeight: 700, color: passed ? '#52c41a' : '#ff4d4f', margin: '16px 0' }}>
+                {finalScore.score} <span style={{ fontSize: 20, color: '#999', fontWeight: 400 }}>/ {finalScore.total}</span>
+              </div>
+              <div style={{ width: 200, height: 8, background: '#f0f0f0', borderRadius: 4, margin: '0 auto 16px' }}>
+                <div style={{ width: `${pct}%`, height: '100%', background: passed ? '#52c41a' : '#faad14', borderRadius: 4 }} />
+              </div>
+              <p style={{ color: '#999', fontSize: 14, marginBottom: 24 }}>
+                正确率 {pct}% · {pct >= 60 ? '及格' : '未及格'}
+              </p>
+            </>
+          )}
+          <button onClick={() => navigate('/exams')} style={{ padding: '10px 40px', background: '#1a73e8', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>
+            返回考试列表
+          </button>
         </div>
       </div>
     );
@@ -143,9 +154,9 @@ const ExamRoom: React.FC = () => {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f5f7fa' }}>
       {/* 水印覆盖层 */}
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', zIndex: 999, overflow: 'hidden', opacity: 0.04 }}>
-        {Array.from({ length: 20 }).map((_, i) => (
-          <div key={i} style={{ position: 'absolute', top: `${(i % 5) * 25}%`, left: `${(i % 4) * 30}%`, transform: 'rotate(-30deg)', fontSize: 24, fontWeight: 700, color: '#000' }}>
-            Student ID: {Math.random().toString(36).slice(2, 10)}
+        {Array.from({ length: 15 }).map((_, i) => (
+          <div key={i} style={{ position: 'absolute', top: `${(i % 5) * 25}%`, left: `${(i % 5) * 25 - 5}%`, transform: 'rotate(-25deg)', fontSize: 22, fontWeight: 700, color: '#000', whiteSpace: 'nowrap' }}>
+            {user?.realName || user?.username || 'candidate'} · {user?.id?.slice(0, 8) || ''}
           </div>
         ))}
       </div>

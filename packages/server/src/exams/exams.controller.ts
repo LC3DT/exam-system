@@ -10,8 +10,8 @@ export class ExamsController {
 
   @Roles('admin', 'teacher', 'student')
   @Get()
-  list(@Query() query: any) {
-    return this.examsService.list(query);
+  list(@Query() query: any, @Request() req) {
+    return this.examsService.list({ ...query, role: req.user?.role });
   }
 
   @Roles('admin', 'teacher', 'student')
@@ -36,6 +36,18 @@ export class ExamsController {
   @Post(':id/publish')
   publish(@Param('id') id: string) {
     return this.examsService.publish(id);
+  }
+
+  @Roles('admin', 'teacher')
+  @Post(':id/start')
+  startExam(@Param('id') id: string) {
+    return this.examsService.startExam(id);
+  }
+
+  @Roles('admin', 'teacher')
+  @Post(':id/finish')
+  finishExam(@Param('id') id: string) {
+    return this.examsService.finishExam(id);
   }
 
   @Roles('admin', 'teacher')

@@ -9,12 +9,18 @@ export class ExamsService {
     private questionsService: QuestionsService,
   ) {}
 
-  async list(query: { status?: string; page?: number; pageSize?: number }) {
+  async list(query: { status?: string; page?: number; pageSize?: number; role?: string }) {
     const status = query.status;
     const page = Number(query.page || 1);
     const pageSize = Number(query.pageSize || 20);
+    const role = query.role;
     const where: any = {};
-    if (status) where.status = status;
+
+    if (role === 'student') {
+      where.status = status || { in: ['published', 'ongoing', 'finished'] };
+    } else if (status) {
+      where.status = status;
+    }
 
     const [items, total] = await Promise.all([
       this.prisma.exam.findMany({
@@ -131,6 +137,28 @@ export class ExamsService {
     });
   }
 
+  async startExam(id: string) {
+    const exam = await this.getById(id);
+    if (!['published', 'ongoing'].includes(exam.status)) {
+      throw new BadRequestException('只能已发布或进行中的试卷可以开考');
+    }
+    return this.prisma.exam.update({
+      where: { id },
+      data: { status: 'ongoing' },
+    });
+  }
+
+  async finishExam(id: string) {
+    const exam = await this.getById(id);
+    if (!['ongoing', 'published'].includes(exam.status)) {
+      throw new BadRequestException('只能进行中或已发布的试卷可以结束');
+    }
+    return this.prisma.exam.update({
+      where: { id },
+      data: { status: 'finished' },
+    });
+  }
+
   async preview(id: string) {
     const exam = await this.getById(id);
     let totalQuestions = 0;
@@ -181,7 +209,9 @@ export class ExamsService {
     });
     if (existing) {
       const parsed = safeParse(existing.questions);
-      return { ...existing, questions: Array.isArray(parsed) ? parsed : [] };
+      const questions = Array.isArray(parsed) ? parsed : [];
+      const enriched = await this.enrichQuestions(questions);
+      return { ...existing, questions: enriched, durationMinutes: exam.durationMinutes };
     }
 
     const questionList: Array<{ questionId: string; sectionId: string; order: number }> = [];
@@ -230,7 +260,28 @@ export class ExamsService {
     }
 
     const parsed = safeParse(instance.questions);
-    return { ...instance, questions: parsed };
+    const enriched = await this.enrichQuestions(parsed);
+    return { ...instance, questions: enriched, durationMinutes: exam.durationMinutes };
+  }
+
+  private async enrichQuestions(questionList: Array<{ questionId: string; order: number }>) {
+    const ids = questionList.map((q) => q.questionId);
+    const questions = await this.prisma.question.findMany({
+      where: { id: { in: ids } },
+    });
+    const qMap = new Map(questions.map((q) => [q.id, q]));
+
+    return questionList.map((item) => {
+      const q = qMap.get(item.questionId);
+      if (!q) return item;
+      return {
+        questionId: item.questionId,
+        order: item.order,
+        type: q.type,
+        content: safeParse(q.content),
+        options: safeParse(q.options),
+      };
+    });
   }
 }
 

@@ -1,6 +1,6 @@
 import React from 'react';
-import { Table, Button, Space, Tag, message, Popconfirm, Typography } from 'antd';
-import { PlusOutlined, EyeOutlined, EditOutlined, SendOutlined } from '@ant-design/icons';
+import { Table, Button, Space, Tag, message, Popconfirm, Typography, Modal } from 'antd';
+import { PlusOutlined, EyeOutlined, EditOutlined, SendOutlined, PlayCircleOutlined, StopOutlined, BarChartOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 
@@ -35,6 +35,28 @@ const Exams: React.FC = () => {
     fetch();
   };
 
+  const handleStart = async (id: string) => {
+    await api.post(`/exams/${id}/start`);
+    message.success('已开考，考生可以进入答题');
+    fetch();
+  };
+
+  const handleFinish = async (id: string) => {
+    Modal.confirm({
+      title: '确认结束考试',
+      content: '结束后考生将无法继续答题，确定吗？',
+      onOk: async () => {
+        await api.post(`/exams/${id}/finish`);
+        message.success('考试已结束');
+        fetch();
+      },
+    });
+  };
+
+  const handleNavigateReport = (id: string) => {
+    navigate(`/exam/${id}/edit`);
+  };
+
   const columns = [
     { title: '试卷名称', dataIndex: 'title' },
     { title: '总分', dataIndex: 'totalScore', width: 80 },
@@ -46,15 +68,27 @@ const Exams: React.FC = () => {
     }},
     { title: '开始时间', dataIndex: 'startTime', width: 180, render: (v: string) => new Date(v).toLocaleString() },
     {
-      title: '操作', width: 200,
+      title: '操作', width: 280,
       render: (_: any, record: any) => (
         <Space>
-          <Button size="small" icon={<EyeOutlined />} onClick={() => navigate(`/exams/${record.id}/edit`)}>预览</Button>
+          <Button size="small" icon={<EyeOutlined />} onClick={() => navigate(`/exams/${record.id}/edit`)}>查看</Button>
           {record.status === 'draft' && (
             <>
               <Button size="small" icon={<EditOutlined />} onClick={() => navigate(`/exams/${record.id}/edit`)}>编辑</Button>
               <Button size="small" type="primary" icon={<SendOutlined />} onClick={() => handlePublish(record.id)}>发布</Button>
             </>
+          )}
+          {record.status === 'published' && (
+            <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleStart(record.id)}>开考</Button>
+          )}
+          {record.status === 'ongoing' && (
+            <>
+              <Button size="small" icon={<PlayCircleOutlined />} onClick={() => handleStart(record.id)}>继续开考</Button>
+              <Button size="small" danger icon={<StopOutlined />} onClick={() => handleFinish(record.id)}>结束</Button>
+            </>
+          )}
+          {record.status === 'finished' && (
+            <Button size="small" icon={<BarChartOutlined />} onClick={() => navigate('/reports')}>查看报告</Button>
           )}
         </Space>
       ),
